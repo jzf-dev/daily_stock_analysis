@@ -31,6 +31,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from typing import Optional, Dict, Any, List, Tuple
 
 import pandas as pd
@@ -45,6 +46,7 @@ from tenacity import (
 
 from src.patches.eastmoney_patch import eastmoney_patch
 from src.config import get_config
+from src.core.trading_calendar import MARKET_TIMEZONE
 from src.services.stock_list_parser import ParseStatus, parse_analysis_target
 from .base import BaseFetcher, DataFetchError, RateLimitError, STANDARD_COLUMNS, is_bse_code, is_st_stock, is_kc_cy_stock, normalize_stock_code
 from .realtime_types import (
@@ -247,6 +249,16 @@ def _is_us_code(stock_code: str) -> bool:
         False
     """
     return is_us_stock_code(stock_code)
+
+
+def _parse_cn_quote_time(value: str, date_format: str) -> Optional[str]:
+    """Keep the provider observation time; never substitute the request time."""
+    try:
+        return datetime.strptime(value.strip(), date_format).replace(
+            tzinfo=ZoneInfo(MARKET_TIMEZONE["cn"]),
+        ).isoformat()
+    except (ValueError, TypeError, AttributeError):
+        return None
 
 
 def _to_sina_tx_symbol(stock_code: str) -> str:
@@ -1125,7 +1137,7 @@ class AkshareFetcher(BaseFetcher):
             return None
         elif _is_hk_code(stock_code):
             return self._get_hk_realtime_quote(stock_code)
-        elif _is_etf_code(stock_code):
+        elif _is_etf_code(stock_code) and source not in {"sina", "tencent"}:
             source_key = "akshare_etf"
             if not circuit_breaker.is_available(source_key):
                 logger.info(f"[Circuit Breaker] Data source {source_key} is open, skipping")
@@ -1386,6 +1398,7 @@ class AkshareFetcher(BaseFetcher):
                 high=safe_float(fields[4]),
                 low=safe_float(fields[5]),
                 pre_close=pre_close,
+                provider_timestamp=_parse_cn_quote_time(f"{fields[30]} {fields[31]}", "%Y-%m-%d %H:%M:%S"),
             )
             
             logger.info(
@@ -1523,6 +1536,7 @@ class AkshareFetcher(BaseFetcher):
                 code=stock_code,
                 name=fields[1] if len(fields) > 1 else "",
                 source=RealtimeSource.TENCENT,
+                provider_timestamp=_parse_cn_quote_time(fields[30], "%Y%m%d%H%M%S"),
                 price=safe_float(fields[3]),
                 change_pct=safe_float(fields[32]),
                 change_amount=safe_float(fields[31]) if len(fields) > 31 else None,

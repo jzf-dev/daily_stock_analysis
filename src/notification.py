@@ -1984,9 +1984,13 @@ class NotificationService(
         Returns:
             Brief markdown content.
         """
-        if report_date is None:
-            report_date = datetime.now().strftime('%Y-%m-%d')
+        from src.services.report_renderer import (
+            brief_report_disclosures, brief_report_timestamp, build_brief_stock_body,
+        )
         report_language = self._get_report_language(results)
+        timestamp = brief_report_timestamp(results, report_language)
+        if report_date is None:
+            report_date = timestamp[:10]
         labels = get_report_labels(report_language)
         config = get_config()
         if getattr(config, 'report_renderer_enabled', False) and results:
@@ -2000,8 +2004,6 @@ class NotificationService(
             )
             if out:
                 return out
-        from src.services.report_renderer import build_brief_stock_body
-
         # Built-in rendering also works when Jinja2 or a custom template is unavailable.
         if not results:
             return f"{report_date} {labels['brief_title']}\n\n{labels['no_results']}"
@@ -2013,15 +2015,13 @@ class NotificationService(
             labels['brief_summary'].format(total=len(results), buy=buy_count, hold=hold_count, sell=sell_count),
         ]
         self._append_market_status_line(lines, results, report_language)
+        lines.extend(brief_report_disclosures(results, report_language))
+        lines.append("")
         for r in sorted_results:
             name = self._get_display_name(r, report_language)
-            lines.extend([f"📌 {name}({r.code})", build_brief_stock_body(r, report_language)])
-            news_disclosure = self._empty_news_disclosure(r, report_language)
-            if news_disclosure:
-                lines.append(news_disclosure)
-            self._append_data_sources_line(lines, r, labels, emphasize=False)
+            lines.extend([f"📌 {name}({r.code})", build_brief_stock_body(r, report_language, show_data_warning=False)])
             lines.append("")
-        lines.extend([labels['brief_check_quote'], "", datetime.now().strftime('%Y-%m-%d %H:%M:%S')])
+        lines.extend([labels['brief_check_quote'], "", f"{labels['generated_at_label']}：{timestamp}"])
         models = self._collect_models_used(results)
         if models:
             lines.append(f"{labels['analysis_model_label']}: {', '.join(models)}")

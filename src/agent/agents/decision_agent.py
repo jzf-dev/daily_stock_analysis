@@ -107,6 +107,9 @@ must include at minimum these top-level keys:
   key_points, risk_warning
 
 In ``dashboard.battle_plan.position_strategy``, include these optional fields:
+- ``buy_condition``: a complete evidence-backed entry rule with trigger and
+  every confirmation. A future entry plan during Watch is not a current buy
+  signal. Use null when the evidence is insufficient.
 - ``sell_condition``: a plain-language, evidence-backed sell rule with trigger
   price/direction, intraday or close confirmation, and whether to consider
   selling some or all. Include all relevant watch conditions.
@@ -116,6 +119,11 @@ In ``dashboard.battle_plan.position_strategy``, include these optional fields:
 Never invent trigger prices, confirmation durations or proportions. Use null
 when the evidence is insufficient. Urgency and next-check time are not expiry;
 do not promise automatic updates.
+Keep rules concise but complete. Label each supported branch as Intraday,
+Close confirmation, or Next session YYYY-MM-DD; never invent timing. Preserve
+negations, AND/OR relationships and every required volume/price confirmation.
+Set ``conditions_complete`` to true only if the three rules incorporate every
+relevant watch condition, otherwise false. Do not drop constraints for brevity.
 
 Important: ``decision_type`` must stay within the existing enum
 ``buy|hold|sell``. Express stronger conviction via ``confidence_level``,

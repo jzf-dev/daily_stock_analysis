@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 from collections.abc import Mapping
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -61,6 +62,7 @@ def render_analysis_context_pack_overview(
                         _first_item_field(block.get("items"), "source"),
                     ),
                     **_public_timestamps(block),
+                    **_public_quote_price(key, block, from_items=True),
                     "warnings": _list_strings(block.get("warnings")),
                     "missing_reasons": _item_missing_reasons(block.get("items")),
                 }
@@ -163,6 +165,7 @@ def _sanitize_persisted_overview(overview: Mapping[str, Any]) -> Optional[Dict[s
                 "status": status,
                 "source": _safe_text(block.get("source")) or None,
                 **_public_timestamps(block),
+                **_public_quote_price(key, block),
                 "warnings": _list_strings(block.get("warnings")),
                 "missing_reasons": _list_strings(block.get("missing_reasons"), limit=3),
             }
@@ -191,6 +194,24 @@ def _sanitize_persisted_overview(overview: Mapping[str, Any]) -> Optional[Dict[s
     if "data_quality" in overview:
         sanitized["data_quality"] = _sanitize_data_quality(overview.get("data_quality"))
     return sanitized
+
+
+def _public_quote_price(key: str, block: Mapping[str, Any], *, from_items: bool = False) -> Dict[str, float]:
+    """Expose only the quote's numeric price, never arbitrary item payloads."""
+    if key != "quote":
+        return {}
+    value = block.get("price")
+    if from_items:
+        items = block.get("items")
+        item = items.get("price") if isinstance(items, Mapping) else None
+        value = item.get("value") if isinstance(item, Mapping) else None
+    if isinstance(value, bool):
+        return {}
+    try:
+        price = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return {}
+    return {"price": price} if math.isfinite(price) and price > 0 else {}
 
 
 def _public_timestamps(block: Mapping[str, Any]) -> Dict[str, str]:

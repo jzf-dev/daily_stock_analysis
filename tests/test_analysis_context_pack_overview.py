@@ -148,6 +148,7 @@ def test_renderer_outputs_only_public_schema_fields() -> None:
     assert set(overview["metadata"]) == {"trigger_source", "news_result_count"}
     assert set(overview["blocks"][0]) == {
         "key",
+        "price",
         "label",
         "status",
         "source",
@@ -460,3 +461,19 @@ def test_public_timestamps_reject_invalid_values_and_do_not_infer_item_times() -
     restored = extract_analysis_context_pack_overview({"analysis_context_pack_overview": overview})
     quote = next(item for item in restored["blocks"] if item["key"] == "quote")
     assert not {"timestamp", "provider_timestamp", "fetched_at"}.intersection(quote)
+
+
+
+def test_only_actual_numeric_quote_price_survives_overview_api_round_trip():
+    from api.v1.schemas.history import AnalysisContextPackOverview
+    pack = _pack()
+    overview = render_analysis_context_pack_overview(pack)
+    restored = extract_analysis_context_pack_overview({"analysis_context_pack_overview": overview})
+    restored = AnalysisContextPackOverview.model_validate(restored).model_dump(exclude_none=True)
+    quote = next(item for item in restored["blocks"] if item["key"] == "quote")
+    assert quote["price"] == 1880.0
+    assert not any("price" in item for item in restored["blocks"] if item["key"] != "quote")
+    for bad in (True, "NaN", "inf", -1, 0, {"secret": "not-a-price"}):
+        overview["blocks"] = [{"key": "quote", "label": "Quote", "status": "available", "price": bad}]
+        sanitized = extract_analysis_context_pack_overview({"analysis_context_pack_overview": overview})
+        assert "price" not in sanitized["blocks"][0]

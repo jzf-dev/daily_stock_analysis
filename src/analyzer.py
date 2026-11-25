@@ -1164,6 +1164,8 @@ def normalize_battle_plan_for_action(result: "AnalysisResult") -> None:
     strategy = battle.get("position_strategy")
     if isinstance(strategy, dict):
         strategy["entry_plan"] = entry
+        if "buy_condition" in strategy:
+            strategy["buy_condition"] = entry
         strategy["suggested_position"] = _localized_text(
             language, zh="空仓 0 成；持仓者按减仓/卖出计划执行。",
             en="No position: 0%; holders follow the reduce/sell plan.",
@@ -2410,8 +2412,10 @@ class GeminiAnalyzer:
                 "suggested_position": "建议仓位：X成",
                 "entry_plan": "分批建仓策略描述",
                 "risk_control": "风控策略描述",
-                "sell_condition": "用白话给出完整卖出规则：数据支持的触发价格/方向、盘中或收盘确认方式、考虑卖出一部分还是全部；包含相关观察条件。不凭空补价格、确认时长或比例，不能确定则 null",
-                "stop_loss_condition": "用白话给出完整止损规则：触发价格/方向、盘中或收盘确认、触发后考虑卖出范围；不得把参考价自动当作即时卖出指令，依据不足则 null",
+                "buy_condition": "用白话给出有依据的完整买入规则，包含触发价格/方向及全部确认要求；观望时是后续计划，不代表现在买入；依据不足则 null 各分支在有依据时明确标注“盘中”“收盘确认”或“次日YYYY-MM-DD”；每条简短但保留否定语句、且/或关系及全部约束。 仅当这三条规则已包含全部相关观察约束时将 conditions_complete 设为 true，否则保持 false。",
+                "conditions_complete": false,
+                "sell_condition": "用白话给出完整卖出规则：数据支持的触发价格/方向、盘中或收盘确认方式、考虑卖出一部分还是全部；包含相关观察条件。不凭空补价格、确认时长或比例，不能确定则 null 各分支在有依据时明确标注“盘中”“收盘确认”或“次日YYYY-MM-DD”；每条简短但保留否定语句、且/或关系及全部约束。",
+                "stop_loss_condition": "用白话给出完整止损规则：触发价格/方向、盘中或收盘确认、触发后考虑卖出范围；不得把参考价自动当作即时卖出指令，依据不足则 null 明确区分盘中、收盘确认和有日期的次日分支；简短但保留完整确认方式与卖出范围。",
                 "validity": "规则有效截止的市场当地日期和时段；不得将立即行动/不急或下一次检查时间当作有效期，不承诺自动更新，无法确定则 null"
             },
             "action_checklist": [
@@ -2601,8 +2605,10 @@ class GeminiAnalyzer:
                 "suggested_position": "建议仓位：X成",
                 "entry_plan": "分批建仓策略描述",
                 "risk_control": "风控策略描述",
-                "sell_condition": "用白话给出完整卖出规则：数据支持的触发价格/方向、盘中或收盘确认方式、考虑卖出一部分还是全部；包含相关观察条件。不凭空补价格、确认时长或比例，不能确定则 null",
-                "stop_loss_condition": "用白话给出完整止损规则：触发价格/方向、盘中或收盘确认、触发后考虑卖出范围；不得把参考价自动当作即时卖出指令，依据不足则 null",
+                "buy_condition": "用白话给出有依据的完整买入规则，包含触发价格/方向及全部确认要求；观望时是后续计划，不代表现在买入；依据不足则 null 各分支在有依据时明确标注“盘中”“收盘确认”或“次日YYYY-MM-DD”；每条简短但保留否定语句、且/或关系及全部约束。 仅当这三条规则已包含全部相关观察约束时将 conditions_complete 设为 true，否则保持 false。",
+                "conditions_complete": false,
+                "sell_condition": "用白话给出完整卖出规则：数据支持的触发价格/方向、盘中或收盘确认方式、考虑卖出一部分还是全部；包含相关观察条件。不凭空补价格、确认时长或比例，不能确定则 null 各分支在有依据时明确标注“盘中”“收盘确认”或“次日YYYY-MM-DD”；每条简短但保留否定语句、且/或关系及全部约束。",
+                "stop_loss_condition": "用白话给出完整止损规则：触发价格/方向、盘中或收盘确认、触发后考虑卖出范围；不得把参考价自动当作即时卖出指令，依据不足则 null 明确区分盘中、收盘确认和有日期的次日分支；简短但保留完整确认方式与卖出范围。",
                 "validity": "规则有效截止的市场当地日期和时段；不得将立即行动/不急或下一次检查时间当作有效期，不承诺自动更新，无法确定则 null"
             },
             "action_checklist": [
@@ -2859,8 +2865,10 @@ Output strictly in the following JSON format. This is a complete Decision Dashbo
                 "suggested_position": "Suggested position: X/10",
                 "entry_plan": "Description of the staged entry plan",
                 "risk_control": "Description of the risk-control strategy",
-                "sell_condition": "Plain-language complete exit rule: evidence-backed trigger price/direction, intraday or close confirmation, and whether to consider selling some or all. Include relevant watch conditions. Never invent prices, confirmation durations or proportions; use null if unsupported",
-                "stop_loss_condition": "Complete stop rule: trigger price/direction, intraday or close confirmation and proposed exit scope. A reference level alone is not an immediate sell instruction; use null if unsupported",
+                "buy_condition": "A complete evidence-backed entry rule, including price/direction and every required confirmation. Watch does not mean buy now; use null when unsupported. For each branch, explicitly label Intraday, Close confirmation, or Next session YYYY-MM-DD only when supported. Keep each branch concise without dropping negations or AND/OR constraints. Set conditions_complete=true only when these three rules include every relevant watch constraint; otherwise keep false.",
+                "conditions_complete": false,
+                "sell_condition": "Plain-language complete exit rule: evidence-backed trigger price/direction, intraday or close confirmation, and whether to consider selling some or all. Include relevant watch conditions. Never invent prices, confirmation durations or proportions; use null if unsupported For each branch, explicitly label Intraday, Close confirmation, or Next session YYYY-MM-DD only when supported. Keep each branch concise without dropping negations or AND/OR constraints.",
+                "stop_loss_condition": "Complete stop rule: trigger price/direction, intraday or close confirmation and proposed exit scope. A reference level alone is not an immediate sell instruction; use null if unsupported Explicitly distinguish Intraday, Close confirmation and dated next-session branches; keep every confirmation and exit scope, using concise complete sentences.",
                 "validity": "Market-local expiry date and session of these rules. Urgency and next-check time are not expiry. Do not promise automatic updates; use null if unknown"
             },
             "action_checklist": [
@@ -2925,8 +2933,10 @@ Output strictly in the following JSON format. This is a complete Decision Dashbo
                 "suggested_position": "Suggested position: X/10",
                 "entry_plan": "Description of the staged entry plan",
                 "risk_control": "Description of the risk-control strategy",
-                "sell_condition": "Plain-language complete exit rule: evidence-backed trigger price/direction, intraday or close confirmation, and whether to consider selling some or all. Include relevant watch conditions. Never invent prices, confirmation durations or proportions; use null if unsupported",
-                "stop_loss_condition": "Complete stop rule: trigger price/direction, intraday or close confirmation and proposed exit scope. A reference level alone is not an immediate sell instruction; use null if unsupported",
+                "buy_condition": "A complete evidence-backed entry rule, including price/direction and every required confirmation. Watch does not mean buy now; use null when unsupported. For each branch, explicitly label Intraday, Close confirmation, or Next session YYYY-MM-DD only when supported. Keep each branch concise without dropping negations or AND/OR constraints. Set conditions_complete=true only when these three rules include every relevant watch constraint; otherwise keep false.",
+                "conditions_complete": false,
+                "sell_condition": "Plain-language complete exit rule: evidence-backed trigger price/direction, intraday or close confirmation, and whether to consider selling some or all. Include relevant watch conditions. Never invent prices, confirmation durations or proportions; use null if unsupported For each branch, explicitly label Intraday, Close confirmation, or Next session YYYY-MM-DD only when supported. Keep each branch concise without dropping negations or AND/OR constraints.",
+                "stop_loss_condition": "Complete stop rule: trigger price/direction, intraday or close confirmation and proposed exit scope. A reference level alone is not an immediate sell instruction; use null if unsupported Explicitly distinguish Intraday, Close confirmation and dated next-session branches; keep every confirmation and exit scope, using concise complete sentences.",
                 "validity": "Market-local expiry date and session of these rules. Urgency and next-check time are not expiry. Do not promise automatic updates; use null if unknown"
             },
             "action_checklist": [

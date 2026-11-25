@@ -105,6 +105,8 @@ class PositionStrategy(BaseModel):
     suggested_position: Optional[str] = None
     entry_plan: Optional[str] = None
     risk_control: Optional[str] = None
+    buy_condition: Optional[str] = None
+    conditions_complete: Optional[bool] = None
     sell_condition: Optional[str] = None
     stop_loss_condition: Optional[str] = None
     validity: Optional[str] = None

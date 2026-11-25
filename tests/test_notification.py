@@ -852,7 +852,7 @@ class TestNotificationServiceReportGeneration(unittest.TestCase):
         self.assertIn("Not holding：Check the conditions below before considering an entry", out)
         self.assertNotIn("Not holding：Wait for explicit entry conditions before buying", out)
         self.assertIn("Overall score：72/100", out)
-        self.assertIn("🟢 Advice：Buy", out)
+        self.assertIn("🟢 Original analysis advice：Buy", out)
 
     @mock.patch("src.notification.get_config")
     def test_generate_aggregate_report_routes_by_report_type(self, mock_get_config: mock.MagicMock):
@@ -917,7 +917,7 @@ class TestNotificationServiceReportGeneration(unittest.TestCase):
                     )
 
     @mock.patch("src.notification.get_config")
-    def test_brief_sources_are_isolated_in_builtin_and_template_renderers(
+    def test_brief_omits_internal_sources_in_builtin_and_template_renderers(
         self, mock_get_config: mock.MagicMock
     ):
         alpha = self._source_result("AAA", "Alpha", 80, "daily:AlphaFetcher")
@@ -934,20 +934,12 @@ class TestNotificationServiceReportGeneration(unittest.TestCase):
                     [beta, empty, alpha], report_date="2026-08-27"
                 )
 
-                alpha_start = out.index("📌 Alpha(AAA)")
-                empty_start = out.index("📌 NoSource(NONE)")
-                beta_start = out.index("📌 Beta(BBB)")
-                alpha_block = out[alpha_start:empty_start]
-                empty_block = out[empty_start:beta_start]
-                beta_block = out[beta_start:]
-
-                self.assertIn("daily:AlphaFetcher", alpha_block)
-                self.assertNotIn("daily:BetaFetcher", alpha_block)
-                self.assertNotIn("数据来源", empty_block)
-                self.assertIn("daily:BetaFetcher", beta_block)
-                self.assertNotIn("daily:AlphaFetcher", beta_block)
-                self.assertEqual(out.count("daily:AlphaFetcher"), 1)
-                self.assertEqual(out.count("daily:BetaFetcher"), 1)
+                self.assertIn("📌 Alpha(AAA)", out)
+                self.assertIn("📌 NoSource(NONE)", out)
+                self.assertIn("📌 Beta(BBB)", out)
+                self.assertNotIn("daily:AlphaFetcher", out)
+                self.assertNotIn("daily:BetaFetcher", out)
+                self.assertNotIn("📋 数据来源", out)
 
     @mock.patch("src.notification.get_config")
     def test_dashboard_summary_only_keeps_sources_without_restoring_details(
@@ -990,9 +982,9 @@ class TestNotificationServiceReportGeneration(unittest.TestCase):
 
         self.assertEqual(render.call_count, 2)
         self.assertEqual(dashboard.count("daily:AlphaFetcher"), 1)
-        self.assertEqual(brief.count("daily:AlphaFetcher"), 1)
+        self.assertEqual(brief.count("daily:AlphaFetcher"), 0)
         self.assertIn("*📋 数据来源：daily:AlphaFetcher*", dashboard)
-        self.assertIn("📋 数据来源：daily:AlphaFetcher", brief)
+        self.assertNotIn("📋 数据来源", brief)
 
     @mock.patch("src.notification.get_config")
     def test_source_labels_render_in_all_supported_languages(
@@ -1025,7 +1017,10 @@ class TestNotificationServiceReportGeneration(unittest.TestCase):
                         )
 
                         source_line = f"📋 {expected_label}：daily:AlphaFetcher"
-                        self.assertIn(f"*{source_line}*" if report_type == "simple" else source_line, out)
+                        if report_type == "simple":
+                            self.assertIn(f"*{source_line}*", out)
+                        else:
+                            self.assertNotIn(source_line, out)
 
     @mock.patch("src.notification.get_config")
     def test_reports_omit_source_label_when_data_sources_are_missing(

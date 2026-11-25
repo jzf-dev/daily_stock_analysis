@@ -11,7 +11,8 @@ Any expensive data preparation should be injected by the caller via extra_contex
 
 import logging
 import math
-from datetime import datetime
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -69,8 +70,9 @@ def _brief_text(value: Any, language: Optional[str] = None) -> str:
         # Explain existing terms without dropping negations or inventing thresholds.
         for term, explanation in (
             ("检查减仓计划", "判断是否卖出一部分"),
-            ("确认承接情况", "判断买盘能否支撑价格"),
-            ("承接", "买盘能否支撑价格"),
+            ("确认承接情况", "确认是否有买盘支撑"),
+            ("承接放量", "买盘放量支撑"),
+            ("承接", "买盘支撑"),
             ("兑现条件", "卖出条件"),
             ("减仓", "卖出一部分"),
             ("加仓", "追加买入"),
@@ -79,15 +81,67 @@ def _brief_text(value: Any, language: Optional[str] = None) -> str:
     return text
 
 
-def build_brief_stock_body(result: AnalysisResult, report_language: str) -> str:
+def _brief_core_degraded(result: AnalysisResult) -> bool:
+    from src.analysis_context_pack_prompt import CORE_DEGRADED_STATUSES
+    from src.phase_decision_guardrail import CORE_DATA_BLOCKS
+
+    overview = getattr(result, "analysis_context_pack_overview", None)
+    overview = overview if isinstance(overview, dict) else {}
+    blocks = overview.get("blocks")
+    quality = overview.get("data_quality")
+    return any(
+        isinstance(item, dict) and item.get("key") in CORE_DATA_BLOCKS
+        and item.get("status") in CORE_DEGRADED_STATUSES
+        for item in (blocks if isinstance(blocks, list) else [])
+    ) or (isinstance(quality, dict) and quality.get("level") == "poor")
+
+
+def _brief_market_zone(result: AnalysisResult) -> str:
+    from src.core.trading_calendar import MARKET_TIMEZONE, get_market_for_stock
+
+    return MARKET_TIMEZONE.get(get_market_for_stock(result.code), "UTC")
+
+
+def _format_brief_time(value: datetime, zone: str, language: str, *, timespec: str) -> str:
+    from src.core.trading_calendar import MARKET_TIMEZONE
+
+    local_time = value.astimezone(ZoneInfo(zone))
+    if normalize_report_language(language) == "zh" and zone == MARKET_TIMEZONE["cn"]:
+        date_format = "%Y-%m-%d %H:%M:%S" if timespec == "seconds" else "%Y-%m-%d %H:%M"
+        return f"{local_time.strftime(date_format)}（北京时间）"
+    return local_time.isoformat(sep=" ", timespec=timespec)
+
+
+def brief_report_timestamp(results: List[AnalysisResult], report_language: str = "zh") -> str:
+    """Use the existing market timezone map instead of the runner's local clock."""
+    zones = {_brief_market_zone(r) for r in results}
+    zone = next(iter(zones)) if len(zones) == 1 else "UTC"
+    return _format_brief_time(datetime.now(timezone.utc), zone, report_language, timespec="seconds")
+
+
+def brief_report_disclosures(results: List[AnalysisResult], language: str) -> List[str]:
+    """Disclose shared gaps once; identify stocks when only a subset is affected."""
+    labels = get_report_labels(language)
+    groups: Dict[str, List[str]] = {}
+    for result in results:
+        if not getattr(result, "success", True):
+            continue
+        messages = [labels["brief_data_warning"]] if _brief_core_degraded(result) else []
+        news = empty_news_disclosure(result, language)
+        if news:
+            messages.append(news)
+        for message in messages:
+            groups.setdefault(message, []).append(result.code)
+    return [message if len(codes) == len(results) else f"{', '.join(codes)}：{message}"
+            for message, codes in groups.items()]
+
+
+def build_brief_stock_body(result: AnalysisResult, report_language: str, *, show_data_warning: bool = True) -> str:
     """Share the beginner-readable brief between built-in and template reports.
 
     This is a presentation of the existing decision, not a new signal evaluator.
     No market requests, model calls, inferred order sizes or price triggers occur.
     """
-    from src.analysis_context_pack_prompt import CORE_DEGRADED_STATUSES
-    from src.phase_decision_guardrail import CORE_DATA_BLOCKS
-
     labels = get_report_labels(report_language)
     if not getattr(result, "success", True):
         return labels["brief_failed"]
@@ -111,10 +165,7 @@ def build_brief_stock_body(result: AnalysisResult, report_language: str) -> str:
     overview = overview if isinstance(overview, dict) else {}
     blocks = overview.get("blocks")
     blocks = [item for item in blocks if isinstance(item, dict)] if isinstance(blocks, list) else []
-    core_degraded = any(
-        item.get("key") in CORE_DATA_BLOCKS and item.get("status") in CORE_DEGRADED_STATUSES
-        for item in blocks
-    ) or block(overview, "data_quality").get("level") == "poor"
+    core_degraded = _brief_core_degraded(result)
 
     action_fields = display_action_fields_for_result(result, report_language=report_language)
     action = action_fields["action"]
@@ -134,20 +185,29 @@ def build_brief_stock_body(result: AnalysisResult, report_language: str) -> str:
         try:
             if "T" not in quote_time:
                 raise ValueError("Missing datetime separator")
-            quote_time = datetime.fromisoformat(quote_time.replace("Z", "+00:00")).isoformat(
-                sep=" ", timespec="minutes",
-            )
+            observed = datetime.fromisoformat(quote_time.replace("Z", "+00:00"))
+            if observed.tzinfo is None:
+                raise ValueError("Missing observation timezone")
+            quote_time = _format_brief_time(observed, _brief_market_zone(result), report_language, timespec="minutes")
         except ValueError:
             quote_time = ""
     try:
-        price = float(result.current_price)
-    except (TypeError, ValueError):
+        # A public quote price is sourced from the actual quote block. Only old
+        # overviews with an observation time may use the normalized result price.
+        value = quote.get("price", result.current_price if quote_time else None)
+        price = float(value) if not isinstance(value, bool) else 0.0
+    except (TypeError, ValueError, OverflowError):
         price = 0.0
-    has_quote_price = bool(quote_time) and math.isfinite(price) and price > 0
+    has_quote_price = math.isfinite(price) and price > 0 and quote.get("status") not in {"missing", "fetch_failed", "not_supported"}
+    price_label = labels["brief_price"]
+    if has_quote_price and quote.get("status") == "stale":
+        price_label = labels["brief_stale_price"]
+    elif has_quote_price and not quote_time:
+        price_label = labels["brief_unverified_price"]
     lines: List[str] = [
         f"🕒 {labels['brief_quote_time']}：{quote_time or labels['brief_unknown_time']}",
-        f"💰 {labels['brief_price']}："
-        f"{format_report_price(result.current_price, result.code) if has_quote_price else labels['brief_unknown_price']}",
+        f"💰 {price_label}："
+        f"{format_report_price(price, result.code) if has_quote_price else labels['brief_unknown_price']}",
     ]
     snapshot = getattr(result, "market_snapshot", None)
     if not has_quote_price and isinstance(snapshot, dict) and _brief_text(snapshot.get("date")):
@@ -160,11 +220,13 @@ def build_brief_stock_body(result: AnalysisResult, report_language: str) -> str:
     )
     decision_type = display_decision_type_for_result(result, report_language=report_language)
     advice_icon = {"buy": "🟢", "hold": "🟡", "sell": "🔴"}[decision_type]
-    lines.extend(["", f"{advice_icon} {labels['brief_advice']}：{advice}"])
+    advice_label = labels["brief_original_advice"] if core_degraded or not quote_time else labels["brief_advice"]
+    lines.extend(["", f"{advice_icon} {advice_label}：{advice}"])
     lines.append(f"{labels['brief_score']}：{score_text}")
     lines.append("")
     if core_degraded:
-        lines.append(labels["brief_data_warning"])
+        if show_data_warning:
+            lines.append(labels["brief_data_warning"])
         no_position_key = "brief_no_buy"
         has_position_key = "brief_holder_risk"
     lines.extend([
@@ -186,7 +248,14 @@ def build_brief_stock_body(result: AnalysisResult, report_language: str) -> str:
         return format_report_price(cleaned, result.code)
 
     # A price in an old or contradictory plan must not become a new buy signal.
-    if action in {"buy", "add"} and not core_degraded:
+    buy_rule = _brief_text(strategy.get("buy_condition"), report_language)
+    buy_label = labels["brief_buy_condition"]
+    if action in {"reduce", "sell", "avoid", "alert"}:
+        buy_rule = labels["brief_buy_blocked"]
+    elif core_degraded or not quote_time or action in {"watch", "hold"}:
+        buy_label = labels["brief_future_buy"]
+    lines.extend(["", f"🛒 {buy_label}：{buy_rule or labels['brief_missing_buy']}"])
+    if not buy_rule and action in {"buy", "add"} and not core_degraded:
         entry = reference_price("ideal_buy")
         if entry:
             lines.extend(["", f"{labels['brief_entry']}：{entry}"])
@@ -205,8 +274,10 @@ def build_brief_stock_body(result: AnalysisResult, report_language: str) -> str:
 
     # Keep additional explicit constraints, especially negations. Never replace
     # them with a generic reassessment instruction or a price-only trigger.
-    conditions = statements(phase.get("watch_conditions"))
-    if not conditions and not any(strategy.get(key) for key in ("sell_condition", "stop_loss_condition")):
+    conditions = [] if strategy.get("conditions_complete") is True else statements(phase.get("watch_conditions"))
+    if not conditions and strategy.get("conditions_complete") is not True and not any(
+        strategy.get(key) for key in ("buy_condition", "sell_condition", "stop_loss_condition")
+    ):
         conditions = statements(battle.get("action_checklist"))
     if conditions:
         lines.extend(["", f"{labels['brief_conditions']}：{'；'.join(conditions[:3])}"])
@@ -216,13 +287,6 @@ def build_brief_stock_body(result: AnalysisResult, report_language: str) -> str:
     )
     if reason:
         lines.extend(["", f"{labels['brief_reason']}：{reason}"])
-    risks = statements(block(dashboard, "intelligence").get("risk_alerts"))
-    if not risks and _brief_text(result.risk_warning, report_language):
-        risks = [_brief_text(result.risk_warning, report_language)]
-    limitations = statements(phase.get("data_limitations"))
-    risk_notes = list(dict.fromkeys(risks[:3] + limitations[:3]))
-    if risk_notes:
-        lines.extend(["", f"{labels['brief_risks']}：{'；'.join(risk_notes)}"])
     validity = _brief_text(strategy.get("validity"), report_language) or labels["brief_missing_validity"]
     lines.extend(["", f"{labels['brief_validity']}：{validity}"])
     return "\n".join(lines)
@@ -294,9 +358,6 @@ def render(
         logger.warning("jinja2 not installed, report renderer disabled")
         return None
 
-    if report_date is None:
-        report_date = datetime.now().strftime("%Y-%m-%d")
-
     templates_dir = _resolve_templates_dir()
     template_name = f"report_{platform}.j2"
     template_path = templates_dir / template_name
@@ -312,6 +373,9 @@ def render(
         )
         or getattr(get_config(), "report_language", "zh")
     )
+    brief_timestamp = brief_report_timestamp(results, report_language) if platform == "brief" else None
+    if report_date is None:
+        report_date = brief_timestamp[:10] if brief_timestamp else datetime.now().strftime("%Y-%m-%d")
     labels = get_report_labels(report_language)
 
     # Build template context with pre-computed signal levels (sorted by score)
@@ -346,7 +410,7 @@ def render(
             "stock_name": _escape_md(rn),
             "localized_operation_advice": display_advice,
             "localized_trend_prediction": localize_trend_prediction(r.trend_prediction, report_language),
-            "brief_body": build_brief_stock_body(r, report_language) if platform == "brief" else "",
+            "brief_body": build_brief_stock_body(r, report_language, show_data_warning=False) if platform == "brief" else "",
         })
 
     display_buckets = [
@@ -365,7 +429,7 @@ def render(
                 models_used.append(model)
         models_used = list(dict.fromkeys(models_used))
 
-    report_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    report_timestamp = brief_timestamp or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     def failed_checks(checklist: List[str]) -> List[str]:
         return [c for c in (checklist or []) if c.startswith("❌") or c.startswith("⚠️")]
@@ -392,6 +456,7 @@ def render(
     context: Dict[str, Any] = {
         "report_date": report_date,
         "report_timestamp": report_timestamp,
+        "brief_disclosures": brief_report_disclosures(results, report_language) if platform == "brief" else [],
         "results": sorted_results,
         "enriched": sorted_enriched,  # Sorted by sentiment_score desc
         "summary_only": summary_only,

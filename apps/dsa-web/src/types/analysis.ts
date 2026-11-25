@@ -316,6 +316,8 @@ export interface AnalysisContextPackOverviewBlock {
   timestamp?: string | null;
   providerTimestamp?: string | null;
   fetchedAt?: string | null;
+  /** Price from the quote block, not a model estimate or daily close. */
+  price?: number | null;
   key: string;
   label: string;
   status: AnalysisContextPackBlockStatus;

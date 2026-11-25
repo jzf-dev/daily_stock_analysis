@@ -62,6 +62,7 @@ def _make_tencent_payload(
     fields[4] = "5.00"
     fields[5] = "5.10"
     fields[6] = volume
+    fields[30] = "20261125142136"
     fields[31] = "0.19"
     fields[32] = "3.80"
     fields[33] = "5.20"
@@ -100,6 +101,7 @@ def test_sina_realtime_success_logs_endpoint(caplog, monkeypatch, akshare_fetche
     assert quote is not None
     assert quote.name == "大秦铁路"
     assert quote.price == 5.19
+    assert quote.provider_timestamp == "2026-03-08T15:00:00+08:00"
     assert breaker.successes == ["akshare_sina"]
     assert f"endpoint={SINA_REALTIME_ENDPOINT}" in caplog.text
     assert "[Realtime-Sina] 601006 大秦铁路:" in caplog.text
@@ -161,6 +163,7 @@ def test_tencent_realtime_success_logs_endpoint(caplog, monkeypatch, akshare_fet
     assert quote.name == "大秦铁路"
     assert quote.price == 5.19
     assert quote.volume == 123400
+    assert quote.provider_timestamp == "2026-11-25T14:21:36+08:00"
     assert quote.amount == 6404500
     assert breaker.successes == ["akshare_tencent"]
     assert f"endpoint={TENCENT_REALTIME_ENDPOINT}" in caplog.text
@@ -341,3 +344,77 @@ def test_limit_up_pool_zero_pads_first_seal_times_before_sorting(monkeypatch, ak
     assert [row["code"] for row in result] == ["000001", "000003", "000002"]
     assert result[0]["first_limit_time"] == "092500"
     assert result[0]["last_limit_time"] == "093000"
+
+
+@pytest.mark.parametrize("code", ["159995", "512010"])
+@pytest.mark.parametrize("source, method, breaker_key", [
+    ("tencent", "_get_stock_realtime_quote_tencent", "akshare_tencent"),
+    ("sina", "_get_stock_realtime_quote_sina", "akshare_sina"),
+    ("em", "_get_etf_realtime_quote", "akshare_etf"),
+])
+def test_etf_realtime_respects_source_and_independent_circuit_breaker(monkeypatch, akshare_fetcher, code, source, method, breaker_key):
+    from unittest.mock import Mock
+    breaker = _DummyCircuitBreaker()
+    checked = []
+    def available(key):
+        checked.append(key)
+        return key == breaker_key
+    monkeypatch.setattr(breaker, "is_available", available)
+    monkeypatch.setattr("data_provider.akshare_fetcher.get_realtime_circuit_breaker", lambda: breaker)
+    target = Mock(return_value=object())
+    monkeypatch.setattr(akshare_fetcher, method, target)
+    quote = akshare_fetcher.get_realtime_quote(code, source=source)
+    assert quote is target.return_value
+    target.assert_called_once_with(code)
+    assert checked == [breaker_key]
+
+
+@pytest.mark.parametrize("timestamp", ["", "0", "20260230142100", "20261125", "not-a-time"])
+def test_invalid_tencent_observation_time_never_becomes_request_time(monkeypatch, akshare_fetcher, timestamp):
+    breaker = _DummyCircuitBreaker()
+    monkeypatch.setattr("data_provider.akshare_fetcher.get_realtime_circuit_breaker", lambda: breaker)
+    payload = _make_tencent_payload().replace("20261125142136", timestamp)
+    monkeypatch.setattr("data_provider.akshare_fetcher.requests.get", lambda *a, **kw: _DummyResponse(200, payload))
+    quote = akshare_fetcher.get_realtime_quote("159995", source="tencent")
+    assert quote.price == 5.19
+    assert quote.provider_timestamp is None
+    assert quote.fetched_at is None
+
+
+
+def test_etf_fallback_and_provider_time_reach_the_actual_brief(monkeypatch, akshare_fetcher):
+    from data_provider.base import DataFetcherManager
+    from src.config import Config
+    from src.analyzer import AnalysisResult
+    from src.services.analysis_context_builder import AnalysisContextBuilder, PipelineAnalysisArtifacts
+    from src.analysis_context_pack_overview import render_analysis_context_pack_overview, extract_analysis_context_pack_overview
+    from api.v1.schemas.history import AnalysisContextPackOverview
+    from src.services.report_renderer import build_brief_stock_body
+    breaker = _DummyCircuitBreaker()
+    monkeypatch.setattr("data_provider.akshare_fetcher.get_realtime_circuit_breaker", lambda: breaker)
+    config = Config(stock_list=[], enable_realtime_quote=True, realtime_source_priority="tencent,akshare_sina")
+    monkeypatch.setattr("src.config.get_config", lambda: config)
+    calls = []
+    def response(url, **kwargs):
+        calls.append(url)
+        return _DummyResponse(503, "unavailable") if "qt.gtimg.cn" in url else _DummyResponse(200, _make_sina_payload())
+    monkeypatch.setattr("data_provider.akshare_fetcher.requests.get", response)
+    manager = DataFetcherManager(fetchers=[akshare_fetcher])
+    quote = manager.get_realtime_quote("159995")
+    assert quote is not None
+    assert quote.fallback_from == "tencent"
+    assert quote.provider_timestamp == "2026-03-08T07:00:00+00:00"
+    assert len(calls) == 2 and "qt.gtimg.cn" in calls[0] and "hq.sinajs.cn" in calls[1]
+    pack = AnalysisContextBuilder.build(PipelineAnalysisArtifacts(
+        code="159995", stock_name="ETF", market="cn", phase=None,
+        base_context={}, enhanced_context={}, realtime_quote=quote, trend_result=None,
+        chip_data=None, fundamental_context=None, news_context=None, news_result_count=0, metadata={},
+    ))
+    overview = render_analysis_context_pack_overview(pack)
+    overview = extract_analysis_context_pack_overview({"analysis_context_pack_overview": overview})
+    overview = AnalysisContextPackOverview.model_validate(overview).model_dump(exclude_none=True)
+    result = AnalysisResult(code="159995", name="ETF", sentiment_score=50, trend_prediction="震荡", operation_advice="观望", current_price=9.999)
+    result.analysis_context_pack_overview = overview
+    body = build_brief_stock_body(result, "zh")
+    assert "2026-03-08 15:00（北京时间）" in body
+    assert "5.190" in body and "9.999" not in body
