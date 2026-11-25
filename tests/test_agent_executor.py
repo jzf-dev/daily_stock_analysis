@@ -216,6 +216,10 @@ def test_agent_system_prompts_require_phase_decision_contract() -> None:
         assert '"phase_decision"' in prompt
         assert '"watch_conditions"' in prompt
         assert '"data_limitations"' in prompt
+        for field in ("sell_condition", "stop_loss_condition", "validity"):
+            assert f'"{field}"' in prompt
+        assert "依据不足则 null" in prompt
+        assert "不承诺自动更新" in prompt
         assert "quote/daily_bars/technical 存在 stale、fallback、missing、fetch_failed、partial 或 estimated" in prompt
         assert "`confidence_level` 不得为高" in prompt
 

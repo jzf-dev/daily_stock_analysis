@@ -56,6 +56,7 @@ class VolumeAnalysis(BaseModel):
     """Volume analysis."""
 
     volume_ratio: Optional[Union[int, float, str]] = None
+    volume_ratio_basis: Optional[str] = None
     volume_status: Optional[str] = None
     turnover_rate: Optional[Union[int, float, str]] = None
     volume_meaning: Optional[str] = None
@@ -104,6 +105,9 @@ class PositionStrategy(BaseModel):
     suggested_position: Optional[str] = None
     entry_plan: Optional[str] = None
     risk_control: Optional[str] = None
+    sell_condition: Optional[str] = None
+    stop_loss_condition: Optional[str] = None
+    validity: Optional[str] = None
 
 
 class BattlePlan(BaseModel):

@@ -93,18 +93,18 @@
 {% if price_data %}
 | {{ labels.price_metrics_label }} | {{ labels.current_price_label }} |
 |---------|------|
-| {{ labels.current_price_label }} | {{ price_data.get('current_price', 'N/A') }} |
-| {{ labels.ma5_label }} | {{ price_data.get('ma5', 'N/A') }} |
-| {{ labels.ma10_label }} | {{ price_data.get('ma10', 'N/A') }} |
-| {{ labels.ma20_label }} | {{ price_data.get('ma20', 'N/A') }} |
-| {{ labels.bias_ma5_label }} | {{ price_data.get('bias_ma5', 'N/A') }}% {{ price_data.get('bias_status', 'N/A') }} |
-| {{ labels.support_level_label }} | {{ price_data.get('support_level', 'N/A') }} |
-| {{ labels.resistance_level_label }} | {{ price_data.get('resistance_level', 'N/A') }} |
+| {{ labels.current_price_label }} | {{ format_report_price(price_data.get('current_price'), result.code) }} |
+| {{ labels.ma5_label }} | {{ format_report_price(price_data.get('ma5'), result.code) }} |
+| {{ labels.ma10_label }} | {{ format_report_price(price_data.get('ma10'), result.code) }} |
+| {{ labels.ma20_label }} | {{ format_report_price(price_data.get('ma20'), result.code) }} |
+| {{ labels.bias_ma5_label }} | {{ format_report_metric(price_data.get('bias_ma5'), suffix='%', precision=2) }} {{ price_data.get('bias_status') or '' }} |
+| {{ labels.support_level_label }} | {{ format_report_price(price_data.get('support_level'), result.code) }} |
+| {{ labels.resistance_level_label }} | {{ format_report_price(price_data.get('resistance_level'), result.code) }} |
 {% endif %}
 
 {% set vol_data = data_persp.get('volume_analysis', {}) %}
 {% if vol_data %}
-**{{ labels.volume_label }}**: {{ labels.volume_ratio_label }} {{ vol_data.get('volume_ratio', 'N/A') }} ({{ vol_data.get('volume_status', '') }}) | {{ labels.turnover_rate_label }} {{ vol_data.get('turnover_rate', 'N/A') }}%
+{{ format_volume_analysis(vol_data, report_language) }}
 💡 *{{ vol_data.get('volume_meaning', '') }}*
 {% endif %}
 

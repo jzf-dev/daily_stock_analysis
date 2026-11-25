@@ -219,12 +219,17 @@ class TestReportRenderer(unittest.TestCase):
         self.assertNotIn("理由: 技术面走弱", full_out)
 
     def test_render_brief(self) -> None:
-        """Brief platform renders 3-5 sentence summary."""
+        """Brief platform renders role-specific guidance and conditions."""
         r = _make_result()
         out = render("brief", [r])
         self.assertIsNotNone(out)
         self.assertIn("决策简报", out)
         self.assertIn("贵州茅台", out)
+        self.assertIn("还没买", out)
+        self.assertIn("已经持有", out)
+        self.assertIn("卖出条件", out)
+        self.assertIn("止损条件", out)
+        self.assertIn("有效期", out)
 
     def test_render_brief_omits_decision_signal_excerpt(self) -> None:
         r = _with_decision_signal_summary(_make_result())

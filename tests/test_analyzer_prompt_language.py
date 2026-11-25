@@ -92,6 +92,16 @@ def _make_analyzer(*, legacy: bool, skill_instructions: str = "", default_skill_
 
 
 class EnglishStockPromptTemplateTestCase(unittest.TestCase):
+    def test_all_stock_prompts_request_evidence_backed_exit_rules(self) -> None:
+        for legacy in (True, False):
+            analyzer = _make_analyzer(legacy=legacy)
+            for language in ("zh", "en", "ko"):
+                with self.subTest(legacy=legacy, language=language):
+                    prompt = analyzer._get_analysis_system_prompt(language, stock_code="600519")
+                    for field in ("sell_condition", "stop_loss_condition", "validity"):
+                        self.assertIn(f'"{field}"', prompt)
+                    self.assertIn("null", prompt)
+
     def test_english_system_prompt_has_no_chinese_template_text(self) -> None:
         for legacy in (True, False):
             analyzer = _make_analyzer(legacy=legacy, skill_instructions="### Skill 1: swing\n- watch support")

@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [改进] 将 brief 简报收敛为行情、持有/未买指引、卖出条件、止损条件、原因与有效期；普通/策略及 Agent 原有分析输出追加三个可选规则字段并由 schema 保留，不增加模型调用；旧结果只标注参考价及规则缺失，不虚构触发方式、卖出范围或有效期，原完整报告和默认配置保留。
+- [改进] 按确认样式将 brief 简报的行情时间和当时价格移至每只股票开头；改用明确的持有/未买指引和涨跌参考价说明，移除默认“按原计划”等含糊提示，展示条件及个人持仓信息缺口；保留完整报告和分析流程，不承诺分析提速。
+- [改进] 改造现有 brief 简洁推送，统一默认与模板渲染的通俗操作参考、持仓区分、完整关注条件、风险及行情时间说明；隐藏评分和复杂表格，保留 full 完整报告与原默认格式，不改分析动作、定时或告警开关，不新增配置或模型调用。
+- [测试] 补充简洁报告多语言、八态动作、缺失与过旧数据、完整条件、模板回退及完整报告兼容性的离线回归覆盖。
+- [修复] 统一 AkShare 东财与 efinance 日线成交量单位，避免手数误标为股；保留新浪、腾讯、港股及指数已有口径，不批量改写历史数据。
+- [修复] 报告展示实际行情日期并保留 ETF 三位小数，统一默认、模板和历史报告的空值与量能倍数标签；使用运行时数据校正价格、量能和 ETF 筹码适用状态，减仓/卖出结论不再同时给出新建仓指令。
+- [测试] 增加日线单位转换、报告日期与精度、空值、量能口径、减仓计划一致性及两条流水线筹码适用状态的离线回归覆盖。
+- [文档] 明确代码修改前须遵循现有项目风格与规范，并要求每次改动同步记录变更内容、目的和主要影响，交付时说明验证结果与未验证项。
 - [新功能] 新增 DSA 内部因子契约（`FactorDefinition`/`FactorSnapshot`/`CandidatePoolRun`/`CandidateFactorScore`，契约版本 1.0）：将选股 `factor_scores` 映射为带字段版本、来源、数据质量与降级原因的内部结构（#1902 P0）；仅新增 schema 与纯映射函数，不改变现有选股、API、回测与 DecisionSignal 行为。`ScreenResult.created_at` 改为带本地偏移的 ISO 字符串（按部署进程本地时钟换算为 UTC），`pick_to_factor_snapshot` 的显式 `computed_at` 同样归一化；内置引擎来源守卫的作用域已修正，原创的 `factor_mapping.py` 不再被误判为 AlphaSift 派生文件。
 - [改进] 优化 CI 与发布流水线：`ci.yml` 新增 `push: main` 与 `merge_group` 触发、顶层只读权限与统一 `ci-gate` 汇总门禁，解除 `ai-governance` 对域内检查的串行阻塞；后端引入 `uv` 加速依赖安装，Web CI 补跑 `npm test` (Vitest) 并缓存 Playwright 浏览器，新增 `desktop-tests` 执行桌面端单元测试；将 `create-release.yml`、`docker-publish.yml`、`desktop-release.yml` 收敛为单入口原子发布流 `release.yml`（原生 `ubuntu-24.04-arm` + `ubuntu-24.04` 双架构合并 manifest 与构建溯源），并同步 `scripts/ci_gate.sh` 与契约测试。
 - [修复] Agent 的 `analyze_pattern` 按形态出现前的趋势命名长影线 K 线。取形态出现前的收盘价，以 MA5 与 MA10 的高低判断方向（`StockTrendAnalyzer` 比较的同一组均线），并要求形态前最后一个收盘价也越过 MA5（下跌时低于 MA5，上涨时高于 MA5）：下跌时命名为锤子线/倒锤子，上涨时命名为上吊线/流星线；趋势不明确（包括 MA5 与 MA10 相等、形态前最后一个收盘价等于 MA5）或形态前不足 10 个收盘价时不给出这四个名称。`type` 取值保持不变（锤子线/上吊线为 `reversal_signal`，流星线为 `bearish_signal`），仅倒锤子由 `bearish_signal` 改为 `reversal_signal`；上吊线与倒锤子的说明文字随之调整，锤子线与流星线的条目内容不变。原先按单日涨跌和 K 线颜色命名，与趋势无关。其余形态的识别不变。

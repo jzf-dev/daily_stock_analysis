@@ -28,13 +28,15 @@ import pandas as pd
 from src.config import FUNDAMENTAL_STAGE_TIMEOUT_SECONDS_DEFAULT, get_config, Config
 from src.storage import get_db
 from data_provider import DataFetcherManager
-from data_provider.base import is_bse_code, normalize_stock_code
+from data_provider.base import _is_etf_code, is_bse_code, normalize_stock_code
 from data_provider.realtime_types import ChipDistribution
 from src.analyzer import (
     GeminiAnalyzer,
     AnalysisResult,
     fill_price_position_if_needed,
     normalize_chip_structure_availability,
+    normalize_volume_analysis,
+    normalize_battle_plan_for_action,
     populate_decision_action_fields,
     stabilize_decision_with_structure,
     validate_sniper_price_sanity,
@@ -99,7 +101,7 @@ from src.services.decision_signal_extractor import (
     extract_and_persist_from_analysis_result,
     resolve_decision_signal_action_fields,
 )
-from src.services.stock_list_parser import AnalysisTarget, ParseStatus
+from src.services.stock_list_parser import AnalysisTarget, ParseStatus, parse_analysis_target
 from src.services.decision_signal_summary import summarize_decision_signal
 from src.core.stock_execution_context import (
     StockCancellationToken,
@@ -1144,6 +1146,7 @@ class StockAnalysisPipeline:
             # Step 7.7: price_position fallback
             if result:
                 fill_price_position_if_needed(result, trend_result, realtime_quote)
+                normalize_volume_analysis(result, trend_result, realtime_quote, enhanced_context)
                 action_source_advice = getattr(result, "operation_advice", None)
                 stabilize_decision_with_structure(result, trend_result, fundamental_context)
                 adjustments = apply_phase_decision_guardrails(
@@ -1181,6 +1184,7 @@ class StockAnalysisPipeline:
                 sniper_context = enhanced_context
                 if trend_result is not None:
                     sniper_context = {**enhanced_context, "trend_result": self._safe_to_dict(trend_result)}
+                normalize_battle_plan_for_action(result)
                 validate_sniper_price_sanity(result, sniper_context)
 
             if result:
@@ -1994,9 +1998,10 @@ class StockAnalysisPipeline:
                 )
                 action_chain_valid = pipeline_start_action is not None
                 fill_price_position_if_needed(result, trend_result, realtime_quote)
+                normalize_volume_analysis(result, trend_result, realtime_quote, analysis_context)
                 realtime_data = initial_context.get("realtime_quote", {})
                 if isinstance(realtime_data, dict):
-                    result.current_price = realtime_data.get("price")
+                    result.current_price = realtime_data.get("price") or getattr(result, "current_price", None)
                     result.change_pct = realtime_data.get("change_pct")
                 action_before_guardrail = getattr(result, "action", None)
                 advice_before_guardrail = getattr(result, "operation_advice", None)
@@ -2108,6 +2113,7 @@ class StockAnalysisPipeline:
                             ),
                         )
                     )
+                normalize_battle_plan_for_action(result)
                 validate_sniper_price_sanity(result, initial_context)
 
             if result:
@@ -3516,6 +3522,9 @@ class StockAnalysisPipeline:
             metadata={
                 "query_id": query_id,
                 "trigger_source": self.query_source,
+                **({"chip_not_supported": True} if (
+                    _is_etf_code(code) or parse_analysis_target(code).asset_type == ParseStatus.INDEX
+                ) else {}),
             },
             portfolio_context=dict(portfolio_context) if isinstance(portfolio_context, dict) else None,
         )
@@ -3566,6 +3575,9 @@ class StockAnalysisPipeline:
             metadata={
                 "query_id": query_id,
                 "trigger_source": self.query_source,
+                **({"chip_not_supported": True} if (
+                    _is_etf_code(code) or parse_analysis_target(code).asset_type == ParseStatus.INDEX
+                ) else {}),
             },
             portfolio_context=dict(portfolio_context) if isinstance(portfolio_context, dict) else None,
         )

@@ -22,6 +22,10 @@ from src.formatters import markdown_to_plain_text
 from src.data.stock_index_loader import resolve_index_stock_code
 from src.services.stock_code_utils import resolve_daily_stock_identity
 from src.report_language import (
+    format_market_snapshot_heading,
+    format_report_metric,
+    format_report_price,
+    format_volume_analysis,
     get_bias_status_emoji,
     get_localized_stock_name,
     get_report_labels,
@@ -1271,20 +1275,19 @@ class HistoryService:
                 report_lines.extend([
                     f"| {labels['price_metrics_label']} | {labels['current_price_label']} |",
                     "|---------|------|",
-                    f"| {labels['current_price_label']} | {price_data.get('current_price', 'N/A')} |",
-                    f"| {labels['ma5_label']} | {price_data.get('ma5', 'N/A')} |",
-                    f"| {labels['ma10_label']} | {price_data.get('ma10', 'N/A')} |",
-                    f"| {labels['ma20_label']} | {price_data.get('ma20', 'N/A')} |",
-                    f"| {labels['bias_ma5_label']} | {price_data.get('bias_ma5', 'N/A')}% {bias_emoji}{bias_status} |",
-                    f"| {labels['support_level_label']} | {price_data.get('support_level', 'N/A')} |",
-                    f"| {labels['resistance_level_label']} | {price_data.get('resistance_level', 'N/A')} |",
+                    f"| {labels['current_price_label']} | {format_report_price(price_data.get('current_price'), result.code)} |",
+                    f"| {labels['ma5_label']} | {format_report_price(price_data.get('ma5'), result.code)} |",
+                    f"| {labels['ma10_label']} | {format_report_price(price_data.get('ma10'), result.code)} |",
+                    f"| {labels['ma20_label']} | {format_report_price(price_data.get('ma20'), result.code)} |",
+                    f"| {labels['bias_ma5_label']} | {format_report_metric(price_data.get('bias_ma5'), suffix='%', precision=2)} {bias_emoji}{bias_status} |",
+                    f"| {labels['support_level_label']} | {format_report_price(price_data.get('support_level'), result.code)} |",
+                    f"| {labels['resistance_level_label']} | {format_report_price(price_data.get('resistance_level'), result.code)} |",
                     "",
                 ])
             # 量能分析
             if vol_data:
                 report_lines.extend([
-                    f"**{labels['volume_label']}**: {labels['volume_ratio_label']} {vol_data.get('volume_ratio', 'N/A')} "
-                    f"({vol_data.get('volume_status', '')}) | {labels['turnover_rate_label']} {vol_data.get('turnover_rate', 'N/A')}%",
+                    format_volume_analysis(vol_data, report_language),
                     f"💡 *{vol_data.get('volume_meaning', '')}*",
                     "",
                 ])
@@ -1587,17 +1590,17 @@ class HistoryService:
             return
 
         lines.extend([
-            f"### 📈 {labels['market_snapshot_heading']}",
+            f"### 📈 {format_market_snapshot_heading(snapshot, getattr(result, 'report_language', 'zh'))}",
             "",
             f"| {labels['price_metrics_label']} | {labels['current_price_label']} |",
             "|------|------|",
         ])
 
         # Price info
-        current_price = snapshot.get('price') or snapshot.get('current_price') or result.current_price
+        current_price = snapshot.get('price') or snapshot.get('current_price') or result.current_price or snapshot.get('close')
         change_pct = snapshot.get('change_pct') or snapshot.get('pct_chg') or result.change_pct
         if current_price is not None:
-            current_str = HistoryService._safe_format_number(current_price, ".2f")
+            current_str = format_report_price(current_price, result.code)
             if change_pct is not None:
                 if isinstance(change_pct, str) and change_pct.strip().endswith("%"):
                     change_str = change_pct.strip()
@@ -1618,7 +1621,10 @@ class HistoryService:
         for label, key, fmt in metrics:
             value = snapshot.get(key)
             if value is not None:
-                formatted = HistoryService._safe_format_number(value, fmt)
+                formatted = (
+                    format_report_price(value, result.code) if key in {"open", "high", "low"}
+                    else HistoryService._safe_format_number(value, fmt)
+                )
                 lines.append(f"| {label} | {formatted} |")
 
         lines.extend(["", "---", ""])

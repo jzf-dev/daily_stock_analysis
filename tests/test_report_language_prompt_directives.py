@@ -48,6 +48,16 @@ class DecisionAgentLanguageDirectiveTestCase(unittest.TestCase):
         prompt = self._system_prompt("zh")
         self.assertIn("所有面向用户的人类可读文本值必须使用中文。", prompt)
 
+    def test_dashboard_requests_exit_rules_without_changing_chat_contract(self) -> None:
+        for language in ("zh", "en", "ko"):
+            with self.subTest(language=language):
+                prompt = self._system_prompt(language)
+                for key in ("sell_condition", "stop_loss_condition", "validity"):
+                    self.assertIn(key, prompt)
+                    self.assertNotIn(key, self._system_prompt(language, chat=True))
+                self.assertIn("Use null", prompt)
+                self.assertIn("reference price alone is not an immediate sell rule", prompt)
+
 
 class StructuralLanguageRoutingTestCase(unittest.TestCase):
     def test_context_pack_korean_reuses_english_scaffolding(self) -> None:

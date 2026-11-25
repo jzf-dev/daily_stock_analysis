@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 from typing import Any, Dict, Optional
 
@@ -363,6 +364,46 @@ _REPORT_LABELS: Dict[str, Dict[str, str]] = {
     "zh": {
         "dashboard_title": "决策仪表盘",
         "brief_title": "决策简报",
+        "brief_now": "现在的建议",
+        "brief_actions": "你可以怎么做",
+        "brief_no_position": "还没买",
+        "brief_has_position": "已经持有",
+        "brief_reason": "原因",
+        "brief_conditions": "接下来关注",
+        "brief_missing_conditions": "尚未说明什么情况下可以买卖，暂不能直接据此下单。",
+        "brief_risks": "主要风险",
+        "brief_missing_risks": "报告未提供具体风险说明，不代表没有风险。",
+        "brief_entry": "买入关注价（到价后仍需确认条件）",
+        "brief_stop": "下跌时关注的价格（到价后重新判断是否继续持有，不是到价就卖）",
+        "brief_target": "上涨时关注的价格（到价后重新判断是否卖出一部分，不是到价就卖）",
+        "brief_stop_at": "跌到{price}附近：需要查看最新分析，重新判断是否继续持有，不是到价就卖。",
+        "brief_target_at": "涨到{price}附近：重新判断是否适合卖出一部分，不是到价就卖。",
+        "brief_bar": "最近日线收盘价／日期",
+        "brief_quote_time": "行情时间",
+        "brief_price": "当时价格",
+        "brief_unknown_price": "缺少可核验时间的价格，暂不能确认",
+        "brief_price_notice": "价格可能已变化，操作前请核对最新行情。",
+        "brief_unknown_time": "未提供可核验的行情时间",
+        "brief_data_warning": "数据不完整或较旧，先核对最新行情；以下原报告建议仅供观察。",
+        "brief_failed": "本次分析失败，暂无可用操作建议。",
+        "brief_check_quote": "下单前核对最新价格；系统只提醒，不自动交易。",
+        "brief_no_buy": "先不买，等待明确条件。",
+        "brief_entry_wait": "先核对下方条件，满足后再考虑买入；没有明确条件就等待。",
+        "brief_add_wait": "加仓针对已有持仓；空仓先等明确的买入条件。",
+        "brief_holder_watch": "先观察价格变化，留意下方条件和风险，暂不追加买入。",
+        "brief_holder_add": "先确认下方追加买入条件，没说清楚就先不追加买入。",
+        "brief_holder_reduce": "暂不追加买入，关注下方卖出和止损条件。",
+        "brief_holder_sell": "暂不追加买入，关注下方卖出和止损条件。",
+        "brief_holder_risk": "先查看是否存在继续下跌的风险，暂不追加买入。",
+        "brief_gaps": "信息缺口",
+        "brief_size_gap": "这份简报未结合你的持仓数量和成本，不能确定该买卖多少；没有说清楚的操作条件还需补充，不能直接据此下单。",
+        "brief_sell_condition": "卖出条件",
+        "brief_stop_condition": "止损条件",
+        "brief_validity": "有效期",
+        "brief_missing_sell": "未给出完整卖出规则，暂不能据此下单。",
+        "brief_missing_stop": "未给出完整止损规则，暂不能据此下单。",
+        "brief_missing_validity": "未提供，请勿默认延用到下一交易日。",
+        "brief_reference": "已有参考价：{price}，尚缺确认方式和卖出范围。",
         "analyzed_prefix": "共分析",
         "stock_unit": "只股票",
         "stock_unit_compact": "只",
@@ -498,6 +539,46 @@ _REPORT_LABELS: Dict[str, Dict[str, str]] = {
     "en": {
         "dashboard_title": "Decision Dashboard",
         "brief_title": "Decision Brief",
+        "brief_now": "Current view",
+        "brief_actions": "What you can do",
+        "brief_no_position": "Not holding",
+        "brief_has_position": "Already holding",
+        "brief_reason": "Why",
+        "brief_conditions": "What to watch",
+        "brief_missing_conditions": "No explicit trigger conditions were provided. Wait; a falling price alone is not an entry signal.",
+        "brief_risks": "Main risks",
+        "brief_missing_risks": "No specific risks were provided; this does not mean there are none.",
+        "brief_entry": "Entry watch level (conditions still need confirmation)",
+        "brief_stop": "Downside watch price (reassess whether to keep holding; not an automatic sell)",
+        "brief_target": "Upside watch price (reassess whether to sell some; not an automatic sell)",
+        "brief_stop_at": "If the price falls to around {price}: review the latest analysis and whether to keep holding; do not sell solely because the price is reached.",
+        "brief_target_at": "If the price rises to around {price}: reassess whether to sell some; do not sell solely because the price is reached.",
+        "brief_bar": "Daily reference price / date",
+        "brief_quote_time": "Quote time",
+        "brief_price": "Price at that time",
+        "brief_unknown_price": "Cannot verify a price with a known quote time",
+        "brief_price_notice": "Prices may have changed. Check current quotes before acting.",
+        "brief_unknown_time": "No verifiable quote time provided",
+        "brief_data_warning": "Data is incomplete or older. Verify current quotes; the original advice below is for observation only.",
+        "brief_failed": "Analysis failed; no usable action advice is available.",
+        "brief_check_quote": "Check current prices before ordering. Alerts do not place trades.",
+        "brief_no_buy": "Wait for explicit entry conditions before buying.",
+        "brief_entry_wait": "Check the conditions below before considering an entry. Wait if no explicit conditions are available.",
+        "brief_add_wait": "Adding applies to an existing holding; wait for explicit entry conditions if not holding.",
+        "brief_holder_watch": "Observe price changes and the conditions and risks below; do not buy more yet.",
+        "brief_holder_add": "Verify the conditions for buying more below; wait if they are unclear.",
+        "brief_holder_reduce": "Do not buy more; watch the sell and stop-loss conditions below.",
+        "brief_holder_sell": "Do not buy more; watch the sell and stop-loss conditions below.",
+        "brief_holder_risk": "Review holding risks first; do not add.",
+        "brief_gaps": "Information still needed",
+        "brief_size_gap": "This brief does not use your holding size or cost, so it cannot determine how much to trade. Clarify any incomplete conditions before placing orders.",
+        "brief_sell_condition": "Sell condition",
+        "brief_stop_condition": "Stop-loss condition",
+        "brief_validity": "Valid until",
+        "brief_missing_sell": "No complete sell rule provided; this is not an order instruction.",
+        "brief_missing_stop": "No complete stop-loss rule provided; this is not an order instruction.",
+        "brief_missing_validity": "Not provided; do not assume these rules remain valid next session.",
+        "brief_reference": "Existing reference: {price}; confirmation and exit scope are not specified.",
         "analyzed_prefix": "Analyzed",
         "stock_unit": "stocks",
         "stock_unit_compact": "stocks",
@@ -633,6 +714,46 @@ _REPORT_LABELS: Dict[str, Dict[str, str]] = {
     "ko": {
         "dashboard_title": "결정 대시보드",
         "brief_title": "결정 브리핑",
+        "brief_now": "현재 판단",
+        "brief_actions": "할 수 있는 일",
+        "brief_no_position": "미보유 시",
+        "brief_has_position": "보유 중이라면",
+        "brief_reason": "이유",
+        "brief_conditions": "확인할 조건",
+        "brief_missing_conditions": "명확한 실행 조건이 없습니다. 기다리세요. 가격 하락만으로 매수하지 마세요.",
+        "brief_risks": "주요 위험",
+        "brief_missing_risks": "구체적인 위험 설명이 없습니다. 위험이 없다는 뜻은 아닙니다.",
+        "brief_entry": "매수 관심 가격 (조건 확인 필요)",
+        "brief_stop": "하락 시 확인할 가격 (계속 보유할지 재검토, 자동 매도 아님)",
+        "brief_target": "상승 시 확인할 가격 (일부 매도 여부 재검토, 자동 매도 아님)",
+        "brief_stop_at": "{price} 부근까지 하락하면 최신 분석을 확인하고 보유 여부를 재검토하세요. 가격 도달만으로 매도하지 마세요.",
+        "brief_target_at": "{price} 부근까지 상승하면 일부 매도 여부를 재검토하세요. 가격 도달만으로 매도하지 마세요.",
+        "brief_bar": "일봉 참고 가격 / 날짜",
+        "brief_quote_time": "시세 시각",
+        "brief_price": "해당 시각 가격",
+        "brief_unknown_price": "시세 시각이 확인된 가격이 없어 확인할 수 없습니다",
+        "brief_price_notice": "가격이 달라졌을 수 있습니다. 실행 전 최신 시세를 확인하세요.",
+        "brief_unknown_time": "확인 가능한 시세 시각이 없습니다",
+        "brief_data_warning": "데이터가 불완전하거나 오래되었습니다. 최신 시세를 확인하세요. 아래 기존 의견은 관찰용입니다.",
+        "brief_failed": "분석에 실패하여 실행 가능한 의견이 없습니다.",
+        "brief_check_quote": "주문 전 최신 가격을 확인하세요. 알림은 자동 거래하지 않습니다.",
+        "brief_no_buy": "명확한 매수 조건이 나올 때까지 기다리세요.",
+        "brief_entry_wait": "아래 조건을 확인한 후 매수를 검토하세요. 명확한 조건이 없으면 기다리세요.",
+        "brief_add_wait": "추가 매수는 기존 보유자 대상입니다. 미보유자는 명확한 진입 조건을 기다리세요.",
+        "brief_holder_watch": "가격 변화와 아래 조건 및 위험을 살펴보고 추가 매수는 기다리세요.",
+        "brief_holder_add": "아래 추가 매수 조건을 확인하고 불명확하면 기다리세요.",
+        "brief_holder_reduce": "추가 매수하지 말고 아래 매도 및 손절 조건을 확인하세요.",
+        "brief_holder_sell": "추가 매수하지 말고 아래 매도 및 손절 조건을 확인하세요.",
+        "brief_holder_risk": "보유 위험부터 점검하고 추가 매수하지 마세요.",
+        "brief_gaps": "추가로 필요한 정보",
+        "brief_size_gap": "이 브리핑은 개인 보유 수량과 매입 단가를 사용하지 않아 거래 수량을 정할 수 없습니다. 불명확한 실행 조건을 확인한 후 주문하세요.",
+        "brief_sell_condition": "매도 조건",
+        "brief_stop_condition": "손절 조건",
+        "brief_validity": "유효 기간",
+        "brief_missing_sell": "완전한 매도 규칙이 없어 바로 주문할 수 없습니다.",
+        "brief_missing_stop": "완전한 손절 규칙이 없어 바로 주문할 수 없습니다.",
+        "brief_missing_validity": "제공되지 않았습니다. 다음 거래일까지 유효하다고 가정하지 마세요.",
+        "brief_reference": "기존 참고 가격: {price}. 확인 방식과 매도 범위가 명시되지 않았습니다.",
         "analyzed_prefix": "분석 종목",
         "stock_unit": "개 종목",
         "stock_unit_compact": "개",
@@ -833,6 +954,58 @@ def get_report_labels(language: Optional[str]) -> Dict[str, str]:
     """Return UI copy for the selected report language."""
     normalized = normalize_report_language(language)
     return _REPORT_LABELS[normalized]
+
+
+def format_report_metric(value: Any, suffix: str = "", precision: Optional[int] = None) -> str:
+    """Render missing/non-finite metrics without leaking nulls or dangling units."""
+    if value is None or str(value).strip().rstrip("%").strip().lower() in {"", "none", "null", "nan", "n/a"}:
+        return "N/A"
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+    if not math.isfinite(number):
+        return "N/A"
+    text = f"{number:.{precision}f}" if precision is not None else str(value)
+    return f"{text}{suffix}"
+
+
+def format_volume_analysis(volume: Dict[str, Any], language: Optional[str]) -> str:
+    """Keep realtime volume ratio distinct from daily volume multiples."""
+    labels = get_report_labels(language)
+    basis_labels = {
+        "zh": {"previous_day": "较昨日成交量", "five_day_average": "相对5日均量"},
+        "en": {"previous_day": "Volume vs previous day", "five_day_average": "Volume vs 5-day average"},
+        "ko": {"previous_day": "전일 대비 거래량", "five_day_average": "5일 평균 대비 거래량"},
+    }
+    ratio_label = basis_labels[normalize_report_language(language)].get(
+        volume.get("volume_ratio_basis"), labels["volume_ratio_label"]
+    )
+    ratio = format_report_metric(volume.get("volume_ratio"))
+    turnover = format_report_metric(volume.get("turnover_rate"), suffix="%")
+    status = f" ({volume['volume_status']})" if volume.get("volume_status") else ""
+    return (
+        f"**{labels['volume_label']}**: {ratio_label} {ratio}{status} | "
+        f"{labels['turnover_rate_label']} {turnover}"
+    )
+
+
+def format_report_price(value: Any, stock_code: str) -> str:
+    """Preserve ETF tick precision using the existing market-code classifier."""
+    from data_provider.base import _is_etf_code
+
+    return format_report_metric(value, precision=3 if _is_etf_code(stock_code) else None)
+
+
+def format_market_snapshot_heading(snapshot: Dict[str, Any], language: Optional[str]) -> str:
+    """Show the actual bar date rather than implying the report's session date."""
+    heading = {"zh": "行情快照", "en": "Market Snapshot", "ko": "시세 스냅샷"}[
+        normalize_report_language(language)
+    ]
+    bar_date = snapshot.get("date")
+    if bar_date and re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(bar_date)):
+        heading = f"{heading} ({bar_date})"
+    return heading
 
 
 def get_placeholder_text(language: Optional[str]) -> str:

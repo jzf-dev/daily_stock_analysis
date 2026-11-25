@@ -660,6 +660,9 @@ class AkshareFetcher(BaseFetcher):
                 logger.info(
                     f"[API Response] ak.stock_zh_a_hist succeeded: {len(df)} rows, elapsed {api_elapsed:.2f}s"
                 )
+                # 东财日线成交量为手；项目内部统一使用股。
+                df = df.copy()
+                df['成交量'] = pd.to_numeric(df['成交量'], errors='coerce') * 100
                 return df
             else:
                 logger.warning("[API Response] ak.stock_zh_a_hist returned empty data")
@@ -816,6 +819,9 @@ class AkshareFetcher(BaseFetcher):
                 logger.info(f"[API Response] Columns: {list(df.columns)}")
                 logger.info(f"[API Response] Date range: {df['日期'].iloc[0]} ~ {df['日期'].iloc[-1]}")
                 logger.debug(f"[API Response] Latest 3 rows:\n{df.tail(3).to_string()}")
+                # ETF 东财日线同样以手计量，份额按每手 100 份归一。
+                df = df.copy()
+                df['成交量'] = pd.to_numeric(df['成交量'], errors='coerce') * 100
             else:
                 logger.warning(
                     f"[API Response] ak.fund_etf_hist_em returned empty data, elapsed {api_elapsed:.2f}s"

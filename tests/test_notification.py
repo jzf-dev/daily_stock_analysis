@@ -849,8 +849,9 @@ class TestNotificationServiceReportGeneration(unittest.TestCase):
         out = service.generate_brief_report([result], report_date="2026-07-11")
 
         self.assertIn("🟢1 🟡0 🔴0", out)
-        self.assertIn("Buy | Score 72", out)
-        self.assertNotIn("Hold | Score 72", out)
+        self.assertIn("Not holding：Check the conditions below before considering an entry", out)
+        self.assertNotIn("Not holding：Wait for explicit entry conditions before buying", out)
+        self.assertNotIn("Score 72", out)
 
     @mock.patch("src.notification.get_config")
     def test_generate_aggregate_report_routes_by_report_type(self, mock_get_config: mock.MagicMock):
@@ -932,9 +933,9 @@ class TestNotificationServiceReportGeneration(unittest.TestCase):
                     [beta, empty, alpha], report_date="2026-08-27"
                 )
 
-                alpha_start = out.index("**Alpha(AAA)**")
-                empty_start = out.index("**NoSource(NONE)**")
-                beta_start = out.index("**Beta(BBB)**")
+                alpha_start = out.index("📌 Alpha(AAA)")
+                empty_start = out.index("📌 NoSource(NONE)")
+                beta_start = out.index("📌 Beta(BBB)")
                 alpha_block = out[alpha_start:empty_start]
                 empty_block = out[empty_start:beta_start]
                 beta_block = out[beta_start:]
@@ -990,7 +991,7 @@ class TestNotificationServiceReportGeneration(unittest.TestCase):
         self.assertEqual(dashboard.count("daily:AlphaFetcher"), 1)
         self.assertEqual(brief.count("daily:AlphaFetcher"), 1)
         self.assertIn("*📋 数据来源：daily:AlphaFetcher*", dashboard)
-        self.assertIn("*📋 数据来源：daily:AlphaFetcher*", brief)
+        self.assertIn("📋 数据来源：daily:AlphaFetcher", brief)
 
     @mock.patch("src.notification.get_config")
     def test_source_labels_render_in_all_supported_languages(
@@ -1022,10 +1023,8 @@ class TestNotificationServiceReportGeneration(unittest.TestCase):
                             [result], report_type, report_date="2026-08-27"
                         )
 
-                        self.assertIn(
-                            f"*📋 {expected_label}：daily:AlphaFetcher*",
-                            out,
-                        )
+                        source_line = f"📋 {expected_label}：daily:AlphaFetcher"
+                        self.assertIn(f"*{source_line}*" if report_type == "simple" else source_line, out)
 
     @mock.patch("src.notification.get_config")
     def test_reports_omit_source_label_when_data_sources_are_missing(
@@ -1106,7 +1105,8 @@ class TestNotificationServiceReportGeneration(unittest.TestCase):
 
         out = service.generate_brief_report([result], report_date="2026-02-01")
 
-        self.assertIn("*分析模型: gemini/gemini-2.5-flash*", out)
+        self.assertIn("分析模型: gemini/gemini-2.5-flash", out)
+        self.assertNotIn("*分析模型", out)
 
     @mock.patch("src.notification.get_config")
     def test_generate_dashboard_report_shows_model_by_default(self, mock_get_config: mock.MagicMock):

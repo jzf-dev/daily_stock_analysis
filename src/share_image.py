@@ -1023,7 +1023,7 @@ def _stock_data(markdown_text: str, generated_on: date) -> StockPoster:
         conclusion=conclusion,
     )
 
-    snapshot_section = _section(markdown_text, "市场快照", "当日行情", "market snapshot", "시세 스냅샷")
+    snapshot_section = _section(markdown_text, "市场快照", "行情快照", "当日行情", "market snapshot", "시세 스냅샷")
     snapshot_map: dict[str, str] = {}
     for table in _parse_tables(snapshot_section):
         if len(table.rows) == 1:

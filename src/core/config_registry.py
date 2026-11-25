@@ -2806,7 +2806,7 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
     },
     "REPORT_TYPE": {
         "title": "Report Type",
-        "description": "Report format: 'simple' (concise), 'full' (detailed), or 'brief' (3-5 sentences).",
+        "description": "Report format: 'simple' (concise), 'full' (detailed), or 'brief' (compact quotes, sell/stop-loss rules and validity).",
         "category": "notification",
         "data_type": "string",
         "ui_control": "select",

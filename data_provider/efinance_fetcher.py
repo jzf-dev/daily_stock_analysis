@@ -640,6 +640,11 @@ class EfinanceFetcher(BaseFetcher):
         
         # 重命名列
         df = df.rename(columns=column_mapping)
+
+        # 此数据源支持的 A 股/ETF 东财日线以手计量，内部统一使用股/份。
+        normalized_code = normalize_stock_code(stock_code)
+        if normalized_code.isdigit() and len(normalized_code) == 6 and 'volume' in df.columns:
+            df['volume'] = pd.to_numeric(df['volume'], errors='coerce') * 100
         
         # Fallback: if OHLC columns are missing (e.g. very old data path), fill from close
         if 'close' in df.columns and 'open' not in df.columns:

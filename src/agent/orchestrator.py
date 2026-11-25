@@ -2152,10 +2152,10 @@ class AgentOrchestrator:
 
         if isinstance(realtime, dict) or trend_dict:
             data_perspective["price_position"] = {
-                "current_price": _r(_pick(trend_dict, "current_price", realtime or {}, "price")),
-                "ma5": _r(_pick(trend_dict, "ma5", tech_raw, "ma5")),
-                "ma10": _r(_pick(trend_dict, "ma10", tech_raw, "ma10")),
-                "ma20": _r(_pick(trend_dict, "ma20", tech_raw, "ma20")),
+                "current_price": _pick(trend_dict, "current_price", realtime or {}, "price"),
+                "ma5": _pick(trend_dict, "ma5", tech_raw, "ma5"),
+                "ma10": _pick(trend_dict, "ma10", tech_raw, "ma10"),
+                "ma20": _pick(trend_dict, "ma20", tech_raw, "ma20"),
                 "bias_ma5": _r(_pick(trend_dict, "bias_ma5", tech_raw, "bias_ma5")),
                 "bias_status": _bias_label(trend_dict.get("bias_ma5")) or tech_raw.get("bias_status", "N/A"),
                 "support_level": key_levels.get("support") or key_levels.get("immediate_support") or "N/A",

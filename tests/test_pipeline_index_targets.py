@@ -547,7 +547,7 @@ class PipelineDailySourceAttributionTestCase(unittest.TestCase):
         self.assertEqual(history_result.code, "csi930955")
         self.assertEqual(history_result.name, "红利低波100")
         self.assertIn(
-            "*📋 数据来源：agent:openai,daily:AkshareFetcher*",
+            "📋 数据来源：agent:openai,daily:AkshareFetcher",
             _render_aggregate_report(result, ReportType.BRIEF),
         )
 

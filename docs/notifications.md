@@ -2,6 +2,18 @@
 
 本文档记录通知能力 P0-P7 终态：渠道、配置 key、GitHub Actions 映射、Web 设置元数据、CLI 诊断口径、Web 一键测试、自定义 Webhook Body 模板语义、通知路由策略、降噪机制、聚合报告失败隔离、ntfy / Gotify 一等渠道、WebPush / Apprise 评估，以及本地 / Docker / GitHub Actions / Desktop 场景化配置说明。P0 只做基线与只读诊断；P1 增加 Web 单渠道真实测试；P2 产品化现有 Body 模板；P3 增加 report / alert / system_error 路由；P4 增加进程内降噪；P5 强化测试诊断和聚合报告逐渠道失败隔离；P6-A 新增 ntfy；P6-C 新增 Gotify；P6-D 只评估 WebPush / Apprise；P7 收口文档与 Actions env 对照表自动化，不新增运行时依赖、配置入口、per-URL 模板、跨进程持久化、真实每日摘要或重试循环。
 
+## 简洁报告与完整报告
+
+现有 `REPORT_TYPE=brief` 使用简短的条件式操作参考：行情时间和当时价格 → 还没买/已经持有 → 卖出条件 → 止损条件 → 原因 → 有效期。只有日线收盘价时明确展示日期，不把它当作对应时刻的盘中价格。默认渲染与 `REPORT_RENDERER_ENABLED=true` 的内置模板共用同一套正文；自定义模板需自行同步。简报隐藏评分、均线表、信号权重和重复提醒；额外观察条件、风险与数据限制合并为紧凑说明，保留完整否定语句，不用“按原计划”“重新判断”替代实际规则。只有买入/加仓结论展示已有买入关注价，到价仍须核对原条件。数据过旧或核心行情/指标不完整时突出提示，暂停新买入指引；分析失败不输出操作建议。
+
+分析输出在现有 `dashboard.battle_plan.position_strategy` 中追加三个可选字符串：`sell_condition`（卖出条件）、`stop_loss_condition`（止损条件）、`validity`（有效期）。普通/策略分析的中英文模板及 Agent 两种分析模板均在同一次模型输出中要求给出有依据的触发价格/方向、盘中或收盘确认方式、考虑卖出范围和市场当地有效截止日期/时段；不得凭空补价格、确认时长或比例，依据不足返回 null。嵌套报告 schema 接受并保留这些字段，既有结构化历史与 API 的原 dashboard JSON 可继续承载，原字段和完整报告版式保留。旧报告没有新字段时显示规则未提供，已有目标价/止损价仅标为参考，不自动推导为立即买卖规则；行动紧迫性与下一次检查时间也不冒充有效期。有效期只作报告展示，不自动续期、不承诺自动更新或执行。
+
+`REPORT_TYPE=full` 保留原有完整报告；`simple`、单股推送的既有非 brief 格式和默认配置保持原行为，不会自动切换为 brief，也不会同时发送两份。要使用新简报，在现有报告类型设置中选择 `brief`，恢复完整推送则选择 `full`。本地、Docker、Web/Desktop 共用该配置；GitHub Actions 已映射 `REPORT_TYPE`，可在 Repository variables 中设置。改造不额外调用模型或行情接口，不新增配置、不改变分析动作判定、定时任务或到价告警开关。历史结构化分析仍可用于查看详情；已保存的 Markdown 文件沿用生成时选择的格式。
+
+简报中的日线收盘价不冒充盘中现价，获取时间不冒充行情时间；无法核验行情时间时明确提示。盘中价格仍会变化，操作前须核对最新价格和触发条件。到价提醒不是买入信号，报告也不会自动下单。本次改造不调整推送时间、不启用监控、不发送真实通知。
+
+简洁报告与完整报告共用抓取数据、技术/新闻分析和模型分析步骤，只在结果生成后的呈现阶段不同；三个规则字段由原有调用一并生成，会增加少量输出内容，不增加模型调用轮次。切换为 `brief` 不会减少模型分析步骤，不能据此承诺分析明显提速。消息更短可能减少阅读和部分传输开销，具体送达时间仍取决于分析耗时与通知渠道。
+
 ## 渠道基线
 
 | 渠道 | 类型 | Minimal key | Advanced key | 说明 |
@@ -42,6 +54,12 @@ Telegram 文本消息遇到 HTTP 429 时，优先按 [Bot API 的 `parameters.re
 - 飞书 App Bot 发送路径复用 `requirements.txt` 中已有的 `lark-oapi>=1.0.0`，不是新增依赖；标准源码安装、Docker、GitHub Actions daily workflow 和桌面构建链路均通过 `pip install -r requirements.txt` 安装。官方依据：[Feishu message create OpenAPI](https://open.feishu.cn/document/server-docs/im-v1/message/create)、[lark-oapi PyPI](https://pypi.org/project/lark-oapi/)、[SDK repo](https://github.com/larksuite/oapi-sdk-python)。App Bot 文件上传依赖同一 SDK 的 `im.v1.file.create` API，官方文档：[Feishu file create OpenAPI](https://open.feishu.cn/document/server-docs/im-v1/file/create)。
 
 ## 报告渲染与分片
+
+行情表使用“行情快照”标题并展示实际日线日期，区分报告生成日期与行情所属交易日；ETF 价格保留三位小数。默认渲染、Jinja2 模板、历史 Markdown 与分享图片沿用同一含义，不新增配置项。
+
+量比、换手率的空值或非有限数值显示为 `N/A`，不追加百分号。实时量比、相对 5 日均量、较昨日成交量分别标注；结构化量能新增可选字段 `volume_ratio_basis`（`realtime` / `five_day_average` / `previous_day`），旧记录未提供时保留原有“量比”标签。普通分析和 Agent 分析会使用本轮行情/技术数据校正价格与量能数值。
+
+最终动作为减仓或卖出时，空仓者建议与建仓策略统一为当前不开新仓，买入点改为观察提示；持仓者的减仓建议、止损、目标位与风控计划保持独立。买入、加仓、持有及观望的条件建仓计划不受此规则改写。
 
 当前默认推送报告的入口、内容来源和整体版式保持不变。本阶段只收敛通知渲染的技术路线：沉淀渠道能力画像、发送前消息结构和结构感知分片能力，避免后续按渠道扩展时继续在各 sender 中堆叠平行逻辑。
 

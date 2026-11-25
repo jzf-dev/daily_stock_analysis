@@ -47,7 +47,7 @@ def _history_frame(code: str = "563230") -> pd.DataFrame:
             "最高": [10.2, 10.3, 10.4, 10.5, 10.6],
             "最低": [9.9, 10.0, 10.1, 10.2, 10.3],
             "成交量": [1000, 1100, 1200, 1300, 1400],
-            "成交额": [10100, 11220, 12360, 13520, 14700],
+            "成交额": [1010000, 1122000, 1236000, 1352000, 1470000],
             "涨跌幅": [0.0, 0.99, 0.98, 0.97, 0.96],
         }
     )
@@ -94,6 +94,63 @@ def test_efinance_sz_etf_uses_eastmoney_quote_id_mode() -> None:
     assert call.call_args.kwargs["stock_codes"] == "0.159919"
     assert call.call_args.kwargs["quote_id_mode"] is True
     assert call.call_args.kwargs["use_id_cache"] is False
+
+
+@pytest.mark.parametrize("stock_code", ["159819", "563230", "600519"])
+def test_efinance_daily_normalizes_lots_before_computing_indicators(stock_code: str) -> None:
+    df, _ = _run_efinance_daily(stock_code)
+
+    assert df["volume"].tolist() == [100000, 110000, 120000, 130000, 140000]
+    assert df.iloc[0]["amount"] / df.iloc[0]["volume"] == pytest.approx(10.1)
+    assert df.iloc[-1]["volume_ratio"] == pytest.approx(round(140000 / 115000, 2))
+
+
+@pytest.mark.parametrize(
+    "stock_code,endpoint",
+    [("159819", "fund_etf_hist_em"), ("600519", "stock_zh_a_hist")],
+)
+def test_akshare_eastmoney_daily_normalizes_lots_at_endpoint_boundary(stock_code: str, endpoint: str) -> None:
+    fetcher = _make_akshare_fetcher()
+    source = _history_frame(stock_code)
+    fake_akshare = types.SimpleNamespace(**{endpoint: MagicMock(return_value=source)})
+    with patch.dict(sys.modules, {"akshare": fake_akshare}), patch.object(
+        fetcher, "_set_random_user_agent"
+    ), patch.object(fetcher, "_enforce_rate_limit"):
+        df = fetcher.get_daily_data(stock_code, start_date="2026-01-01", end_date="2026-01-05")
+
+    assert df["volume"].tolist() == [100000, 110000, 120000, 130000, 140000]
+    assert df.iloc[0]["amount"] / df.iloc[0]["volume"] == pytest.approx(10.1)
+    assert source.iloc[0]["成交量"] == 1000  # Do not mutate a provider cache in place.
+
+
+@pytest.mark.parametrize("stock_code", ["600519", "hk00700", "sh000300"])
+def test_akshare_normalizer_preserves_already_normalized_volume(stock_code: str) -> None:
+    fetcher = _make_akshare_fetcher()
+    source = _history_frame(stock_code)
+    source["成交量"] *= 100
+    df = fetcher._normalize_data(source, stock_code)
+
+    assert df.iloc[0]["volume"] == 100000
+
+
+@pytest.mark.parametrize("method,endpoint", [
+    ("_fetch_stock_data_sina", "stock_zh_a_daily"),
+    ("_fetch_stock_data_tx", "stock_zh_a_hist_tx"),
+])
+@pytest.mark.parametrize("stock_code", ["600519", "688001"])
+def test_akshare_share_based_sdk_fallbacks_are_not_scaled_twice(method, endpoint, stock_code) -> None:
+    fetcher = _make_akshare_fetcher()
+    source = pd.DataFrame({
+        "date": ["2026-11-24"], "open": [10], "high": [11], "low": [9], "close": [10],
+        "volume": [100000], "amount": [1000000],
+    })
+    with patch.dict(sys.modules, {"akshare": types.SimpleNamespace(**{endpoint: object()})}), patch(
+        "data_provider.akshare_fetcher._akshare_call_with_timeout", return_value=source
+    ), patch.object(fetcher, "_enforce_rate_limit"):
+        raw = getattr(fetcher, method)(stock_code, "2026-11-24", "2026-11-24")
+    normalized = fetcher._normalize_data(raw, stock_code)
+    assert normalized.iloc[0]["volume"] == 100000
+    assert normalized.iloc[0]["amount"] / normalized.iloc[0]["volume"] == 10
 
 
 def test_efinance_etf_code_variants_use_sh_secid() -> None:

@@ -85,6 +85,7 @@ from src.llm.response_content import strip_leading_think_wrapper
 from src.storage import persist_llm_usage
 from src.data.stock_mapping import STOCK_NAME_MAP
 from src.report_language import (
+    format_report_metric,
     get_signal_level,
     get_no_data_text,
     get_placeholder_text,
@@ -1013,7 +1014,7 @@ def fill_price_position_if_needed(
     trend_result: Any = None,
     realtime_quote: Any = None,
 ) -> None:
-    """Fill missing price_position fields from trend_result / realtime data (in-place)."""
+    """Use computed price facts, filling discretionary support/resistance only when missing."""
     if not result:
         return
     try:
@@ -1044,19 +1045,130 @@ def fill_price_position_if_needed(
             rq = realtime_quote if isinstance(realtime_quote, dict) else (
                 realtime_quote.to_dict() if hasattr(realtime_quote, "to_dict") else {}
             )
-            if _is_value_placeholder(computed.get("current_price")):
+            if _first_numeric_value(rq.get("price")) is not None:
                 computed["current_price"] = rq.get("price")
+
+        current_price = _first_numeric_value(computed.get("current_price"))
+        ma5 = _first_numeric_value(computed.get("ma5"))
+        if current_price is not None and ma5 is not None and ma5 > 0:
+            computed["bias_ma5"] = (current_price - ma5) / ma5 * 100
 
         filled = False
         for k in _PRICE_POS_KEYS:
-            if _is_value_placeholder(pp.get(k)) and not _is_value_placeholder(computed.get(k)):
+            authoritative = k in {"ma5", "ma10", "ma20", "bias_ma5", "current_price"}
+            number = _first_numeric_value(computed.get(k))
+            usable = (
+                number is not None and (k == "bias_ma5" or number > 0)
+                if authoritative else not _is_value_placeholder(computed.get(k))
+            )
+            if (authoritative or _is_value_placeholder(pp.get(k))) and usable:
                 pp[k] = computed[k]
+                if k == "current_price":
+                    result.current_price = number
                 filled = True
         if filled:
             dp["price_position"] = pp
-            logger.info("[price_position] Filled placeholder fields from computed data")
+            logger.info("[price_position] Normalized price fields from computed data")
     except Exception as e:
         logger.warning("[price_position] Fill failed, skipping: %s", e)
+
+
+def normalize_volume_analysis(
+    result: "AnalysisResult",
+    trend_result: Any = None,
+    realtime_quote: Any = None,
+    context: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Bind quantitative volume fields to runtime facts instead of model estimates."""
+    dashboard_value = getattr(result, "dashboard", None)
+    dashboard = dashboard_value if isinstance(dashboard_value, dict) else {}
+    perspective = dashboard.get("data_perspective")
+    if not isinstance(perspective, dict):
+        return
+    volume = perspective.get("volume_analysis")
+    if not isinstance(volume, dict):
+        return
+    quote = _as_dict_for_decision_guard(realtime_quote)
+    trend = _as_dict_for_decision_guard(trend_result)
+    ctx = context if isinstance(context, dict) else {}
+    today = ctx.get("today") or {}
+    ratio = _first_numeric_value(quote.get("volume_ratio"))
+    basis = "realtime"
+    if ratio is None:
+        ratio = _first_numeric_value(today.get("volume_ratio"), trend.get("volume_ratio_5d"))
+        basis = "five_day_average"
+    if ratio is None:
+        ratio = _first_numeric_value(ctx.get("volume_change_ratio"))
+        basis = "previous_day"
+    volume["volume_ratio"] = round(ratio, 2) if ratio is not None else None
+    volume["volume_ratio_basis"] = basis if ratio is not None else None
+    volume["turnover_rate"] = _first_numeric_value(quote.get("turnover_rate"))
+    if trend.get("volume_status"):
+        volume["volume_status"] = trend["volume_status"]
+    language = normalize_report_language(getattr(result, "report_language", "zh"))
+    if ratio is None:
+        volume["volume_meaning"] = _localized_text(
+            language, zh="量能倍数暂无有效数据，未使用模型估算值；换手率仅取实际行情字段。",
+            en="No valid volume multiple is available; model estimates were not used. Turnover uses quote data only.",
+            ko="유효한 거래량 배수가 없어 모델 추정치를 사용하지 않았습니다. 회전율은 실제 시세만 사용합니다.",
+        )
+    elif basis != "realtime":
+        volume["volume_meaning"] = _localized_text(
+            language, zh="所示倍数用于日线成交量比较，不等同于实时量比；换手率未作估算。",
+            en="This multiple compares daily volumes, not realtime volume ratio. Turnover was not estimated.",
+            ko="표시된 배수는 일봉 거래량 비교이며 실시간 거래량 비율이 아닙니다. 회전율은 추정하지 않았습니다.",
+        )
+    else:
+        volume["volume_meaning"] = _localized_text(
+            language, zh="量比取自本轮实时行情，与日线成交量倍数口径不同；换手率未作估算。",
+            en="Volume ratio comes from the current quote and differs from daily volume multiples. Turnover was not estimated.",
+            ko="거래량 비율은 이번 실시간 시세 기준으로 일봉 거래량 배수와 다릅니다. 회전율은 추정하지 않았습니다.",
+        )
+
+
+def normalize_battle_plan_for_action(result: "AnalysisResult") -> None:
+    """Keep reduce/sell recommendations from also opening a new long position."""
+    action = normalize_decision_action(getattr(result, "action", None))
+    if action is None:
+        action = normalize_decision_action(getattr(result, "operation_advice", None))
+    if action not in {"reduce", "sell"}:
+        return
+    dashboard_value = getattr(result, "dashboard", None)
+    dashboard = dashboard_value if isinstance(dashboard_value, dict) else {}
+    core = dashboard.get("core_conclusion")
+    battle = dashboard.get("battle_plan")
+    if not isinstance(core, dict) or not isinstance(battle, dict):
+        return
+    language = normalize_report_language(getattr(result, "report_language", "zh"))
+    entry = _localized_text(
+        language,
+        zh="空仓观望，当前不新开仓；待后续信号确认后重新评估。",
+        en="Stay out; do not open a new position. Reassess after confirmation.",
+        ko="미보유자는 관망하고 신규 진입하지 마세요. 확인 신호 이후 재평가하세요.",
+    )
+    point = _localized_text(
+        language,
+        zh="当前不设买入点，仅观察支撑与压力位。",
+        en="No active entry; monitor support and resistance only.",
+        ko="현재 매수 진입점 없음. 지지·저항만 관찰하세요.",
+    )
+    position = core.get("position_advice")
+    if not isinstance(position, dict):
+        position = {}
+        core["position_advice"] = position
+    position["no_position"] = entry
+    sniper = battle.get("sniper_points")
+    if isinstance(sniper, dict):
+        sniper["ideal_buy"] = point
+        sniper["secondary_buy"] = point
+    strategy = battle.get("position_strategy")
+    if isinstance(strategy, dict):
+        strategy["entry_plan"] = entry
+        strategy["suggested_position"] = _localized_text(
+            language, zh="空仓 0 成；持仓者按减仓/卖出计划执行。",
+            en="No position: 0%; holders follow the reduce/sell plan.",
+            ko="미보유자 0%; 보유자는 축소/매도 계획을 따르세요.",
+        )
 
 
 def _extract_positive_finite_float(value: Any) -> Optional[float]:
@@ -2297,7 +2409,10 @@ class GeminiAnalyzer:
             "position_strategy": {
                 "suggested_position": "建议仓位：X成",
                 "entry_plan": "分批建仓策略描述",
-                "risk_control": "风控策略描述"
+                "risk_control": "风控策略描述",
+                "sell_condition": "用白话给出完整卖出规则：数据支持的触发价格/方向、盘中或收盘确认方式、考虑卖出一部分还是全部；包含相关观察条件。不凭空补价格、确认时长或比例，不能确定则 null",
+                "stop_loss_condition": "用白话给出完整止损规则：触发价格/方向、盘中或收盘确认、触发后考虑卖出范围；不得把参考价自动当作即时卖出指令，依据不足则 null",
+                "validity": "规则有效截止的市场当地日期和时段；不得将立即行动/不急或下一次检查时间当作有效期，不承诺自动更新，无法确定则 null"
             },
             "action_checklist": [
                 "✅/⚠️/❌ 检查项1：多头排列",
@@ -2485,7 +2600,10 @@ class GeminiAnalyzer:
             "position_strategy": {
                 "suggested_position": "建议仓位：X成",
                 "entry_plan": "分批建仓策略描述",
-                "risk_control": "风控策略描述"
+                "risk_control": "风控策略描述",
+                "sell_condition": "用白话给出完整卖出规则：数据支持的触发价格/方向、盘中或收盘确认方式、考虑卖出一部分还是全部；包含相关观察条件。不凭空补价格、确认时长或比例，不能确定则 null",
+                "stop_loss_condition": "用白话给出完整止损规则：触发价格/方向、盘中或收盘确认、触发后考虑卖出范围；不得把参考价自动当作即时卖出指令，依据不足则 null",
+                "validity": "规则有效截止的市场当地日期和时段；不得将立即行动/不急或下一次检查时间当作有效期，不承诺自动更新，无法确定则 null"
             },
             "action_checklist": [
                 "✅/⚠️/❌ 检查项1：当前结构是否满足激活技能条件",
@@ -2740,7 +2858,10 @@ Output strictly in the following JSON format. This is a complete Decision Dashbo
             "position_strategy": {
                 "suggested_position": "Suggested position: X/10",
                 "entry_plan": "Description of the staged entry plan",
-                "risk_control": "Description of the risk-control strategy"
+                "risk_control": "Description of the risk-control strategy",
+                "sell_condition": "Plain-language complete exit rule: evidence-backed trigger price/direction, intraday or close confirmation, and whether to consider selling some or all. Include relevant watch conditions. Never invent prices, confirmation durations or proportions; use null if unsupported",
+                "stop_loss_condition": "Complete stop rule: trigger price/direction, intraday or close confirmation and proposed exit scope. A reference level alone is not an immediate sell instruction; use null if unsupported",
+                "validity": "Market-local expiry date and session of these rules. Urgency and next-check time are not expiry. Do not promise automatic updates; use null if unknown"
             },
             "action_checklist": [
                 "✅/⚠️/❌ Check 1: bullish alignment",
@@ -2803,7 +2924,10 @@ Output strictly in the following JSON format. This is a complete Decision Dashbo
             "position_strategy": {
                 "suggested_position": "Suggested position: X/10",
                 "entry_plan": "Description of the staged entry plan",
-                "risk_control": "Description of the risk-control strategy"
+                "risk_control": "Description of the risk-control strategy",
+                "sell_condition": "Plain-language complete exit rule: evidence-backed trigger price/direction, intraday or close confirmation, and whether to consider selling some or all. Include relevant watch conditions. Never invent prices, confirmation durations or proportions; use null if unsupported",
+                "stop_loss_condition": "Complete stop rule: trigger price/direction, intraday or close confirmation and proposed exit scope. A reference level alone is not an immediate sell instruction; use null if unsupported",
+                "validity": "Market-local expiry date and session of these rules. Urgency and next-check time are not expiry. Do not promise automatic updates; use null if unknown"
             },
             "action_checklist": [
                 "✅/⚠️/❌ Check 1: current structure meets the active skill conditions",
@@ -5476,20 +5600,22 @@ Output the complete Decision Dashboard in JSON format."""
         except (TypeError, ValueError):
             return 'N/A'
 
-    def _format_price(self, value: Optional[float]) -> str:
+    def _format_price(self, value: Optional[float], precision: int = 2) -> str:
         """格式化价格显示"""
-        if value is None:
-            return 'N/A'
         try:
-            return f"{float(value):.2f}"
+            number = float(value)
         except (TypeError, ValueError):
             return 'N/A'
+        return format_report_metric(number, precision=precision)
 
     def _build_market_snapshot(self, context: Dict[str, Any]) -> Dict[str, Any]:
         """构建当日行情快照（展示用）"""
         today = context.get('today', {}) or {}
         realtime = context.get('realtime', {}) or {}
         yesterday = context.get('yesterday', {}) or {}
+        from data_provider.base import _is_etf_code
+
+        precision = 3 if _is_etf_code(context.get('code', '')) else 2
 
         prev_close = yesterday.get('close')
         close = today.get('close')
@@ -5510,14 +5636,14 @@ Output the complete Decision Dashboard in JSON format."""
                 change_amount = None
 
         snapshot = {
-            "date": context.get('date', '未知'),
-            "close": self._format_price(close),
-            "open": self._format_price(today.get('open')),
-            "high": self._format_price(high),
-            "low": self._format_price(low),
-            "prev_close": self._format_price(prev_close),
+            "date": today.get('date') or context.get('date', '未知'),
+            "close": self._format_price(close, precision),
+            "open": self._format_price(today.get('open'), precision),
+            "high": self._format_price(high, precision),
+            "low": self._format_price(low, precision),
+            "prev_close": self._format_price(prev_close, precision),
             "pct_chg": self._format_percent(today.get('pct_chg')),
-            "change_amount": self._format_price(change_amount),
+            "change_amount": self._format_price(change_amount, precision),
             "amplitude": self._format_percent(amplitude),
             "volume": self._format_volume(today.get('volume')),
             "amount": self._format_amount(today.get('amount')),
@@ -5525,8 +5651,8 @@ Output the complete Decision Dashboard in JSON format."""
 
         if realtime:
             snapshot.update({
-                "price": self._format_price(realtime.get('price')),
-                "volume_ratio": realtime.get('volume_ratio', 'N/A'),
+                "price": self._format_price(realtime.get('price'), precision),
+                "volume_ratio": format_report_metric(realtime.get('volume_ratio')),
                 "turnover_rate": self._format_percent(realtime.get('turnover_rate')),
                 "source": getattr(realtime.get('source'), 'value', realtime.get('source', 'N/A')),
             })

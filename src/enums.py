@@ -19,7 +19,7 @@ class ReportType(str, Enum):
     """
     SIMPLE = "simple"  # 精简报告：使用 generate_single_stock_report
     FULL = "full"      # 完整报告：使用 generate_dashboard_report
-    BRIEF = "brief"    # 简洁模式：3-5 句话概括，适合移动端/推送
+    BRIEF = "brief"    # 简洁模式：行情、持仓指引、卖出/止损条件与有效期，适合移动端/推送
 
     @classmethod
     def from_str(cls, value: str) -> "ReportType":

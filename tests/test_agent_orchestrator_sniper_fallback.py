@@ -17,6 +17,21 @@ from src.agent.protocols import AgentContext
 
 
 class TestAgentOrchestratorSniperFallback(unittest.TestCase):
+    def test_finalization_preserves_explicit_exit_rules(self):
+        orch = AgentOrchestrator(tool_registry=MagicMock(), llm_adapter=MagicMock())
+        ctx = AgentContext(query="test", stock_code="301308", stock_name="测试")
+        strategy = {
+            "sell_condition": "收盘价达到12.50后考虑卖出一部分。",
+            "stop_loss_condition": "收盘价低于10.80才考虑退出，盘中跌破不直接卖出。",
+            "validity": "仅2026-11-25交易时段有效。",
+        }
+        payload = {
+            "decision_type": "hold", "analysis_summary": "继续观察",
+            "dashboard": {"battle_plan": {"position_strategy": strategy}},
+        }
+        normalized = orch._finalize_dashboard_payload(payload, ctx)
+        self.assertEqual(normalized["dashboard"]["battle_plan"]["position_strategy"], strategy)
+
     def test_secondary_buy_does_not_duplicate_ideal_buy(self):
         orch = AgentOrchestrator(
             tool_registry=MagicMock(),

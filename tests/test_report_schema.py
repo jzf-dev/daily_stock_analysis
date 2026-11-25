@@ -127,6 +127,22 @@ class TestAnalysisReportSchema(unittest.TestCase):
 class TestAnalyzerSchemaFallback(unittest.TestCase):
     """Analyzer fallback when schema validation fails."""
 
+    def test_parse_response_preserves_complete_exit_rules(self) -> None:
+        strategy = {
+            "sell_condition": "收盘价达到12.50时，考虑卖出一部分。",
+            "stop_loss_condition": "收盘价低于10.80才考虑退出，盘中短暂跌破不直接卖出。",
+            "validity": "仅2026-11-25交易时段有效。",
+        }
+        response = json.dumps({
+            "stock_name": "测试", "sentiment_score": 35, "operation_advice": "减仓",
+            "analysis_summary": "控制风险", "dashboard": {
+                "battle_plan": {"position_strategy": strategy},
+            },
+        })
+        result = GeminiAnalyzer()._parse_response(response, "600519", "测试")
+        self.assertTrue(result.success)
+        self.assertEqual(result.dashboard["battle_plan"]["position_strategy"], strategy)
+
     def test_parse_response_continues_when_schema_fails(self) -> None:
         """When schema validation fails, analyzer continues with raw dict."""
         analyzer = GeminiAnalyzer()

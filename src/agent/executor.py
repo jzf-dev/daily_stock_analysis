@@ -138,7 +138,12 @@ LEGACY_DEFAULT_AGENT_SYSTEM_PROMPT = """你是一位专注于趋势交易的{mar
         }},
         "battle_plan": {{
             "sniper_points": {{"ideal_buy": "", "secondary_buy": "", "stop_loss": "", "take_profit": ""}},
-            "position_strategy": {{"suggested_position": "", "entry_plan": "", "risk_control": ""}},
+            "position_strategy": {{
+                "suggested_position": "", "entry_plan": "", "risk_control": "",
+                "sell_condition": "用白话写明数据支持的卖出触发价格/方向、盘中或收盘确认方式和卖出一部分或全部，包含相关观察条件；不得凭空补价格、确认时长或比例，依据不足则 null",
+                "stop_loss_condition": "用白话写明止损触发价格/方向、确认方式和考虑卖出范围；不得把参考价自动变成即时卖出指令，依据不足则 null",
+                "validity": "规则有效截止的市场当地日期和时段；不将行动紧迫性或下一次检查时间当有效期，不承诺自动更新，无法确定则 null"
+            }},
             "action_checklist": []
         }},
         "phase_decision": {{
@@ -297,7 +302,12 @@ AGENT_SYSTEM_PROMPT = """你是一位{market_role}投资分析 Agent，拥有数
         }},
         "battle_plan": {{
             "sniper_points": {{"ideal_buy": "", "secondary_buy": "", "stop_loss": "", "take_profit": ""}},
-            "position_strategy": {{"suggested_position": "", "entry_plan": "", "risk_control": ""}},
+            "position_strategy": {{
+                "suggested_position": "", "entry_plan": "", "risk_control": "",
+                "sell_condition": "用白话写明数据支持的卖出触发价格/方向、盘中或收盘确认方式和卖出一部分或全部，包含相关观察条件；不得凭空补价格、确认时长或比例，依据不足则 null",
+                "stop_loss_condition": "用白话写明止损触发价格/方向、确认方式和考虑卖出范围；不得把参考价自动变成即时卖出指令，依据不足则 null",
+                "validity": "规则有效截止的市场当地日期和时段；不将行动紧迫性或下一次检查时间当有效期，不承诺自动更新，无法确定则 null"
+            }},
             "action_checklist": []
         }},
         "phase_decision": {{

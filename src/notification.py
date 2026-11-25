@@ -38,6 +38,10 @@ from src.notification_noise import (
     release_notification_noise,
 )
 from src.report_language import (
+    format_market_snapshot_heading,
+    format_report_metric,
+    format_report_price,
+    format_volume_analysis,
     get_localized_stock_name,
     get_report_labels,
     get_signal_level,
@@ -426,6 +430,8 @@ class NotificationService(
         lines: List[str],
         result: AnalysisResult,
         labels: Dict[str, str],
+        *,
+        emphasize: bool = True,
     ) -> bool:
         data_sources = getattr(result, "data_sources", None)
         if not isinstance(data_sources, str):
@@ -433,7 +439,8 @@ class NotificationService(
         data_sources = data_sources.strip()
         if not data_sources:
             return False
-        lines.append(f"*📋 {labels['data_sources_label']}：{data_sources}*")
+        line = f"📋 {labels['data_sources_label']}：{data_sources}"
+        lines.append(f"*{line}*" if emphasize else line)
         return True
 
     def generate_aggregate_report(
@@ -1516,24 +1523,23 @@ class NotificationService(
                         ])
                     # 价格位置
                     if price_data:
-                        bias_status = price_data.get('bias_status', 'N/A')
+                        bias_status = price_data.get('bias_status') or ''
                         report_lines.extend([
                             f"| {labels['price_metrics_label']} | {labels['current_price_label']} |",
                             "|---------|------|",
-                            f"| {labels['current_price_label']} | {price_data.get('current_price', 'N/A')} |",
-                            f"| {labels['ma5_label']} | {price_data.get('ma5', 'N/A')} |",
-                            f"| {labels['ma10_label']} | {price_data.get('ma10', 'N/A')} |",
-                            f"| {labels['ma20_label']} | {price_data.get('ma20', 'N/A')} |",
-                            f"| {labels['bias_ma5_label']} | {price_data.get('bias_ma5', 'N/A')}% {bias_status} |",
-                            f"| {labels['support_level_label']} | {price_data.get('support_level', 'N/A')} |",
-                            f"| {labels['resistance_level_label']} | {price_data.get('resistance_level', 'N/A')} |",
+                            f"| {labels['current_price_label']} | {format_report_price(price_data.get('current_price'), result.code)} |",
+                            f"| {labels['ma5_label']} | {format_report_price(price_data.get('ma5'), result.code)} |",
+                            f"| {labels['ma10_label']} | {format_report_price(price_data.get('ma10'), result.code)} |",
+                            f"| {labels['ma20_label']} | {format_report_price(price_data.get('ma20'), result.code)} |",
+                            f"| {labels['bias_ma5_label']} | {format_report_metric(price_data.get('bias_ma5'), suffix='%', precision=2)} {bias_status} |",
+                            f"| {labels['support_level_label']} | {format_report_price(price_data.get('support_level'), result.code)} |",
+                            f"| {labels['resistance_level_label']} | {format_report_price(price_data.get('resistance_level'), result.code)} |",
                             "",
                         ])
                     # 量能分析
                     if vol_data:
                         report_lines.extend([
-                            f"**{labels['volume_label']}**: {labels['volume_ratio_label']} {vol_data.get('volume_ratio', 'N/A')} ({vol_data.get('volume_status', '')}) | "
-                            f"{labels['turnover_rate_label']} {vol_data.get('turnover_rate', 'N/A')}%",
+                            format_volume_analysis(vol_data, report_language),
                             f"💡 *{vol_data.get('volume_meaning', '')}*",
                             "",
                         ])
@@ -1969,7 +1975,7 @@ class NotificationService(
         report_date: Optional[str] = None,
     ) -> str:
         """
-        Generate brief report (3-5 sentences per stock) for mobile/push.
+        Generate an actionable, beginner-readable brief for mobile/push.
 
         Args:
             results: Analysis results list (use [result] for single stock).
@@ -1994,38 +2000,31 @@ class NotificationService(
             )
             if out:
                 return out
-        # Fallback: brief summary from dashboard report
+        from src.services.report_renderer import build_brief_stock_body
+
+        # Built-in rendering also works when Jinja2 or a custom template is unavailable.
         if not results:
-            return f"# {report_date} {labels['brief_title']}\n\n{labels['no_results']}"
+            return f"{report_date} {labels['brief_title']}\n\n{labels['no_results']}"
         sorted_results = sorted(results, key=lambda x: x.sentiment_score, reverse=True)
         buy_count, sell_count, hold_count = self._count_display_decisions(results, report_language)
         lines = [
-            f"# {report_date} {labels['brief_title']}",
+            f"{report_date} {labels['brief_title']}",
             "",
             f"> {len(results)} {labels['stock_unit_compact']} | 🟢{buy_count} 🟡{hold_count} 🔴{sell_count}",
         ]
         self._append_market_status_line(lines, results, report_language)
         for r in sorted_results:
-            signal_text, emoji, _ = self._get_signal_level(r)
             name = self._get_display_name(r, report_language)
-            dash = r.dashboard or {}
-            core = dash.get('core_conclusion', {}) or {}
-            one = (core.get('one_sentence') or r.analysis_summary or '')[:60]
-            lines.append(
-                f"**{name}({r.code})** {emoji} "
-                f"{signal_text} | "
-                f"{labels['score_label']} {r.sentiment_score} | {one}"
-            )
+            lines.extend([f"📌 {name}({r.code})", build_brief_stock_body(r, report_language)])
             news_disclosure = self._empty_news_disclosure(r, report_language)
             if news_disclosure:
                 lines.append(news_disclosure)
-            if self._append_data_sources_line(lines, r, labels):
-                lines.append("")
-        lines.append("")
-        lines.append(f"*{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*")
+            self._append_data_sources_line(lines, r, labels, emphasize=False)
+            lines.append("")
+        lines.extend([labels['brief_check_quote'], "", datetime.now().strftime('%Y-%m-%d %H:%M:%S')])
         models = self._collect_models_used(results)
         if models:
-            lines.append(f"*{labels['analysis_model_label']}: {', '.join(models)}*")
+            lines.append(f"{labels['analysis_model_label']}: {', '.join(models)}")
         return "\n".join(lines)
 
     def generate_single_stock_report(self, result: AnalysisResult) -> str:
@@ -2220,7 +2219,7 @@ class NotificationService(
         labels = get_report_labels(report_language)
 
         lines.extend([
-            f"### 📈 {labels['market_snapshot_heading']}",
+            f"### 📈 {format_market_snapshot_heading(snapshot, report_language)}",
             "",
             f"| {labels['close_label']} | {labels['prev_close_label']} | {labels['open_label']} | {labels['high_label']} | {labels['low_label']} | {labels['change_pct_label']} | {labels['change_amount_label']} | {labels['amplitude_label']} | {labels['volume_label']} | {labels['amount_label']} |",
             "|------|------|------|------|------|-------|-------|------|--------|--------|",
