@@ -848,10 +848,11 @@ class TestNotificationServiceReportGeneration(unittest.TestCase):
 
         out = service.generate_brief_report([result], report_date="2026-07-11")
 
-        self.assertIn("🟢1 🟡0 🔴0", out)
+        self.assertIn("Analyzed 1\n🟢 Buy/Add: 1\n🟡 Hold/Watch etc.: 0\n🔴 Reduce/Sell: 0", out)
         self.assertIn("Not holding：Check the conditions below before considering an entry", out)
         self.assertNotIn("Not holding：Wait for explicit entry conditions before buying", out)
-        self.assertNotIn("Score 72", out)
+        self.assertIn("Overall score：72/100", out)
+        self.assertIn("🟢 Advice：Buy", out)
 
     @mock.patch("src.notification.get_config")
     def test_generate_aggregate_report_routes_by_report_type(self, mock_get_config: mock.MagicMock):

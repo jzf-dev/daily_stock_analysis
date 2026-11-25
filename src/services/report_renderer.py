@@ -116,7 +116,8 @@ def build_brief_stock_body(result: AnalysisResult, report_language: str) -> str:
         for item in blocks
     ) or block(overview, "data_quality").get("level") == "poor"
 
-    action = display_action_fields_for_result(result, report_language=report_language)["action"]
+    action_fields = display_action_fields_for_result(result, report_language=report_language)
+    action = action_fields["action"]
     no_position_key = {
         "buy": "brief_entry_wait", "add": "brief_add_wait",
     }.get(action, "brief_no_buy")
@@ -144,14 +145,23 @@ def build_brief_stock_body(result: AnalysisResult, report_language: str) -> str:
         price = 0.0
     has_quote_price = bool(quote_time) and math.isfinite(price) and price > 0
     lines: List[str] = [
-        f"{labels['brief_quote_time']}：{quote_time or labels['brief_unknown_time']}",
-        f"{labels['brief_price']}："
+        f"🕒 {labels['brief_quote_time']}：{quote_time or labels['brief_unknown_time']}",
+        f"💰 {labels['brief_price']}："
         f"{format_report_price(result.current_price, result.code) if has_quote_price else labels['brief_unknown_price']}",
     ]
     snapshot = getattr(result, "market_snapshot", None)
     if not has_quote_price and isinstance(snapshot, dict) and _brief_text(snapshot.get("date")):
         bar_price = format_report_price(snapshot.get("close"), result.code)
         lines.append(f"{labels['brief_bar']}：{bar_price} / {_brief_text(snapshot['date'])}")
+    score = format_report_metric(result.sentiment_score, precision=0)
+    score_text = score if score == "N/A" else f"{score}/100"
+    advice = labels.get(f"brief_action_{action}") or display_operation_advice_for_result(
+        result, report_language=report_language,
+    )
+    decision_type = display_decision_type_for_result(result, report_language=report_language)
+    advice_icon = {"buy": "🟢", "hold": "🟡", "sell": "🔴"}[decision_type]
+    lines.extend(["", f"{advice_icon} {labels['brief_advice']}：{advice}"])
+    lines.append(f"{labels['brief_score']}：{score_text}")
     lines.append("")
     if core_degraded:
         lines.append(labels["brief_data_warning"])
@@ -181,9 +191,9 @@ def build_brief_stock_body(result: AnalysisResult, report_language: str) -> str:
         if entry:
             lines.extend(["", f"{labels['brief_entry']}：{entry}"])
 
-    for rule_key, point_key, label_key, missing_key in (
-        ("sell_condition", "take_profit", "brief_sell_condition", "brief_missing_sell"),
-        ("stop_loss_condition", "stop_loss", "brief_stop_condition", "brief_missing_stop"),
+    for rule_key, point_key, label_key, missing_key, icon in (
+        ("sell_condition", "take_profit", "brief_sell_condition", "brief_missing_sell", "💸"),
+        ("stop_loss_condition", "stop_loss", "brief_stop_condition", "brief_missing_stop", "⚠️"),
     ):
         rule = _brief_text(strategy.get(rule_key), report_language)
         if not rule:
@@ -191,7 +201,7 @@ def build_brief_stock_body(result: AnalysisResult, report_language: str) -> str:
             reference = reference_price(point_key)
             if reference:
                 rule = f"{rule} {labels['brief_reference'].format(price=reference)}"
-        lines.extend(["", f"{labels[label_key]}：{rule}"])
+        lines.extend(["", f"{icon} {labels[label_key]}：{rule}"])
 
     # Keep additional explicit constraints, especially negations. Never replace
     # them with a generic reassessment instruction or a price-only trigger.

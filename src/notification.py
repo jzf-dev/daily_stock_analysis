@@ -2010,7 +2010,7 @@ class NotificationService(
         lines = [
             f"{report_date} {labels['brief_title']}",
             "",
-            f"> {len(results)} {labels['stock_unit_compact']} | 🟢{buy_count} 🟡{hold_count} 🔴{sell_count}",
+            labels['brief_summary'].format(total=len(results), buy=buy_count, hold=hold_count, sell=sell_count),
         ]
         self._append_market_status_line(lines, results, report_language)
         for r in sorted_results:
