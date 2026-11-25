@@ -350,13 +350,15 @@ describe('ChatPage', () => {
   });
 
   it('blocks sending only when backend status confirms unavailability and links to Agent settings', async () => {
-    mockGetStatus.mockResolvedValueOnce({
+    const unavailableStatus = {
       backend: 'codex_app_server',
       available: false,
       experimental: false,
       errorCode: 'backend_removed',
       message: 'Codex App Server has been removed',
-    });
+    };
+    const status = createDeferred<typeof unavailableStatus>();
+    mockGetStatus.mockReturnValueOnce(status.promise);
     const router = createMemoryRouter(
       [
         { path: '/chat', element: <ChatPage /> },
@@ -368,7 +370,9 @@ describe('ChatPage', () => {
 
     const input = await screen.findByPlaceholderText(/分析 600519/);
     expect(input).toBeDisabled();
-    fireEvent.click(screen.getByRole('button', { name: '前往 Agent 设置' }));
+    expect(screen.queryByRole('button', { name: '前往 Agent 设置' })).not.toBeInTheDocument();
+    status.resolve(unavailableStatus);
+    fireEvent.click(await screen.findByRole('button', { name: '前往 Agent 设置' }));
     expect(await screen.findByText('Agent settings destination')).toBeInTheDocument();
     // React Router v7 applies navigations asynchronously; waitFor keeps the
     // assertion in an act-wrapped retry loop instead of reading a stale router state.

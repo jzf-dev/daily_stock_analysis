@@ -753,7 +753,7 @@ describe('DecisionSignalsPage', () => {
     expect(screen.queryByText(/已保存为新的 DecisionSignal #89/)).not.toBeInTheDocument();
   });
 
-  it('reports an expired signal refresh separately and refreshes active views', async () => {
+  it.each([1, 180])('refreshes active views for an expired signal created %i days ago while respecting the timeline range', async (ageDays) => {
     const refreshedItem = makeSignal({
       id: 90,
       decisionProfile: 'balanced',
@@ -761,6 +761,7 @@ describe('DecisionSignalsPage', () => {
       triggerSource: 'api',
       action: 'buy',
       status: 'active',
+      createdAt: new Date(Date.now() - ageDays * 24 * 60 * 60 * 1000).toISOString(),
       metadata: {
         decision_profile: 'balanced',
         profile_source: 'user_selected',
@@ -780,9 +781,13 @@ describe('DecisionSignalsPage', () => {
         blockedReason: null,
       };
     });
-    vi.mocked(decisionSignalsApi.list).mockImplementation(async () => (
-      listResponse(persisted ? [refreshedItem, signal] : [signal])
-    ));
+    vi.mocked(decisionSignalsApi.list).mockImplementation(async (params) => {
+      const items = persisted ? [refreshedItem, signal] : [signal];
+      const createdFrom = params?.createdFrom;
+      return listResponse(createdFrom
+        ? items.filter((item) => item.createdAt && new Date(item.createdAt) >= new Date(createdFrom))
+        : items);
+    });
     vi.mocked(decisionSignalsApi.getLatest).mockImplementation(async () => (
       listResponse(persisted ? [refreshedItem, signal] : [signal])
     ));
@@ -794,8 +799,14 @@ describe('DecisionSignalsPage', () => {
 
     expect(await screen.findByText('重评估信号已刷新')).toBeInTheDocument();
     expect(screen.getByText(/DecisionSignal #90 已按存储契约完成过期续期或缺失维度补齐/)).toBeInTheDocument();
-    expect(await screen.findByTestId('timeline-click-90')).toBeInTheDocument();
     await waitFor(() => expect(decisionSignalsApi.getLatest).toHaveBeenCalledTimes(2));
+    if (ageDays < 90) {
+      expect(await screen.findByTestId('timeline-click-90')).toBeInTheDocument();
+    } else {
+      expect(screen.queryByTestId('timeline-click-90')).not.toBeInTheDocument();
+    }
+    expect(vi.mocked(decisionSignalsApi.list).mock.calls.filter(([params]) => params?.pageSize === 100))
+      .toHaveLength(ageDays < 90 ? 2 : 1);
   });
 
   it('keeps a terminal existing item terminal and does not inject it into active views', async () => {
