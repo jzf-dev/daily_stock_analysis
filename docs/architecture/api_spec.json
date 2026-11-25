@@ -7767,6 +7767,19 @@
             "type": "array",
             "title": "Missing Reasons",
             "description": "缺失原因"
+          },
+          "price": {
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price",
+            "description": "行情块原始报价，不含模型估算值"
           }
         },
         "type": "object",
