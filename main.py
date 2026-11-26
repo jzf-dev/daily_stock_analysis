@@ -1208,20 +1208,6 @@ def run_full_analysis(
                     trigger_source=review_trigger_source,
                     region=market_review_region,
                 )
-                if (
-                    market_context_generated_during_stock
-                    and not merge_notification
-                    and not args.no_notify
-                    and pipeline.notifier.is_available()
-                ):
-                    if pipeline.notifier.send(
-                        f"# 📈 大盘复盘\n\n{market_report}",
-                        email_send_to_all=True,
-                        route_type="report",
-                    ):
-                        logger.info("Sent market review notification using reused market context")
-                    else:
-                        logger.warning("Failed to send market review notification using reused market context")
 
             review_result = None
             if not can_skip_market_review:
@@ -1237,7 +1223,8 @@ def run_full_analysis(
                     notifier=pipeline.notifier,
                     analyzer=pipeline.analyzer,
                     search_service=pipeline.search_service,
-                    send_notification=not args.no_notify,
+                    # 常规分析保留复盘和大盘上下文，不再单独推送第二份报告。
+                    send_notification=False,
                     merge_notification=merge_notification,
                     override_region=market_review_region,
                     query_id=query_id,

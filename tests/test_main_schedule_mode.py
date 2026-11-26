@@ -1931,7 +1931,7 @@ class MainScheduleModeTestCase(unittest.TestCase):
         self.assertEqual(pipeline.run.call_args.kwargs["current_time"].tzinfo, timezone.utc)
         run_with_lock.assert_called_once()
         self.assertFalse(run_with_lock.call_args.kwargs["merge_notification"])
-        self.assertTrue(run_with_lock.call_args.kwargs["send_notification"])
+        self.assertFalse(run_with_lock.call_args.kwargs["send_notification"])
         run_market_review.assert_not_called()
         refresh.assert_called_once_with(config)
         pipeline.run.assert_called_once()
@@ -2169,9 +2169,12 @@ class MainScheduleModeTestCase(unittest.TestCase):
             ],
         )
         run_with_lock_mock.assert_called_once()
+        self.assertFalse(run_with_lock_mock.call_args.kwargs["send_notification"])
+        pipeline.notifier.send.assert_not_called()
         run_market_review.assert_not_called()
         refresh.assert_called_once_with(config)
         pipeline.run.assert_called_once()
+        self.assertTrue(pipeline.run.call_args.kwargs["send_notification"])
 
     def test_run_full_analysis_reuses_runtime_market_context_after_stock_analysis(self) -> None:
         args = self._make_args()
@@ -2213,9 +2216,10 @@ class MainScheduleModeTestCase(unittest.TestCase):
         self.assertTrue(pipeline_kwargs["daily_market_context_allow_generate"])
         run_with_lock.assert_not_called()
         run_market_review.assert_not_called()
-        pipeline.notifier.send.assert_called_once()
-        self.assertIn("## 本轮运行时完整复盘", pipeline.notifier.send.call_args.args[0])
-        self.assertEqual(pipeline.notifier.send.call_args.kwargs["route_type"], "report")
+        pipeline.notifier.send.assert_not_called()
+        pipeline.notifier.save_report_to_file.assert_called_once()
+        saved_content = pipeline.notifier.save_report_to_file.call_args.args[0]
+        self.assertIn("## 本轮运行时完整复盘", saved_content)
         query_scoped_read = unittest.mock.call(
             config,
             pipeline=pipeline,
@@ -2244,6 +2248,7 @@ class MainScheduleModeTestCase(unittest.TestCase):
         )
         refresh.assert_called_once_with(config)
         pipeline.run.assert_called_once()
+        self.assertTrue(pipeline.run.call_args.kwargs["send_notification"])
 
     def test_run_full_analysis_saves_reused_runtime_market_context_without_notify(self) -> None:
         args = self._make_args(no_notify=True)
@@ -2397,7 +2402,7 @@ class MainScheduleModeTestCase(unittest.TestCase):
         sleep.assert_called_once_with(2)
         self.assertEqual(
             run_with_lock_mock.call_args.kwargs["send_notification"],
-            True,
+            False,
         )
         run_market_review.assert_not_called()
         run_with_lock_mock.assert_called_once()
