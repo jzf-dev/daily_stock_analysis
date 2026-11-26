@@ -805,7 +805,13 @@ If `--stocks` is also present, the Futu portfolio wins. Scheduled mode reloads r
 
 ### GitHub Actions Schedule
 
-Edit `.github/workflows/00-daily-analysis.yml`:
+This repository's daily workflow currently retains only `workflow_dispatch`, called by Windows Task Scheduler at 14:20 Beijing time on weekdays. Analysis still runs on GitHub runners with the existing repository Secrets / Variables; Windows does not need local model keys or Python analysis dependencies.
+
+Run the Windows task as the user already signed in to GitHub, and retrieve credentials through that user's Git Credential Manager for in-process GitHub API authentication. Do not store tokens in scripts, task arguments, or logs. The account needs workflow write access to the repository. The current setup requires the Windows user to remain signed in (a locked session works), with the computer powered on and online; the task can request wake from sleep and catch up after a missed start. Set a weekly Monday-Friday 14:20 trigger in Beijing time and ignore new instances while one is running.
+
+Validate credentials and workflow access first, publish removal of the original `on.schedule`, and then enable the Windows task to prevent duplicate notifications. An accepted API request means submission, not successful analysis; check the GitHub Actions result for completion. Before retrying a failed request, check whether it already created a run.
+
+To restore native GitHub scheduling, disable the Windows task first, then restore the following configuration under `on` in `.github/workflows/00-daily-analysis.yml` (the original 14:20 schedule is `'20 6 * * 1-5'`). GitHub scheduled events can be delayed or dropped:
 
 ```yaml
 schedule:

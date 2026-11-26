@@ -864,7 +864,13 @@ OpenD 默认地址为 `127.0.0.1:11111`，可用 `FUTU_OPEND_HOST` / `FUTU_OPEND
 
 ### GitHub Actions 定时
 
-编辑 `.github/workflows/00-daily-analysis.yml`:
+本仓库的每日分析工作流当前仅保留 `workflow_dispatch`，由 Windows 任务计划程序在工作日北京时间 14:20 调用；分析继续在 GitHub runner 执行，复用仓库 Secrets / Variables，不要求 Windows 本地配置模型密钥或安装 Python 分析依赖。
+
+Windows 任务应使用已登录 GitHub 的 Windows 用户，通过其 Git Credential Manager 获取凭据，仅在进程内用于 GitHub API 认证，不将令牌写入脚本、任务参数或日志。该用户需要目标仓库的工作流写入权限；当前配置要求用户保持登录（锁屏可运行）、电脑开机联网，任务可请求唤醒休眠设备，并在错过时间后补跑。Windows 触发器设为每周一至周五 14:20，时区为北京时间，重复实例设为忽略新实例。
+
+切换时先验证凭据和工作流访问，再发布移除原 `on.schedule` 的改动，最后启用 Windows 任务，避免两个触发源重复推送。Windows 日志中的 API 接受请求仅代表已提交，分析完成仍以 GitHub Actions 的运行结果为准；请求失败应先检查是否已经生成运行记录，再决定是否重试。
+
+如需恢复 GitHub 原生定时，先停用 Windows 任务，再在 `.github/workflows/00-daily-analysis.yml` 的 `on` 下恢复以下配置（原来的 14:20 对应 `'20 6 * * 1-5'`）；GitHub 的定时事件可能延迟或漏触发：
 
 ```yaml
 schedule:
