@@ -248,7 +248,9 @@ def run_market_review(
                     region=mkt,
                     config=runtime_config,
                 )
-                review_result = mkt_analyzer.run_daily_review_with_snapshot()
+                review_result = mkt_analyzer.run_daily_review_with_snapshot(
+                    include_brief=send_notification and not merge_notification,
+                )
                 mkt_report = review_result.report
                 _collect_market_light_snapshot(
                     market_light_snapshots,
@@ -286,7 +288,9 @@ def run_market_review(
                 region=run_region,
                 config=runtime_config,
             )
-            review_result = market_analyzer.run_daily_review_with_snapshot()
+            review_result = market_analyzer.run_daily_review_with_snapshot(
+                include_brief=send_notification and not merge_notification,
+            )
             review_report = review_result.report
             market_light_snapshots = {}
             _collect_market_light_snapshot(
@@ -367,6 +371,7 @@ def run_market_review(
                 report_content = _render_market_review_payload_markdown(
                     market_review_payload,
                     wrapper_title=review_text["push_title"],
+                    prefer_brief=True,
                 )
 
                 send_kwargs: Dict[str, Any] = {
@@ -380,7 +385,10 @@ def run_market_review(
                 except (TypeError, ValueError):
                     supports_payload = False
                 if supports_payload:
-                    send_kwargs["structured_payload"] = market_review_payload
+                    notification_payload = dict(market_review_payload)
+                    if _has_market_brief(market_review_payload):
+                        notification_payload["presentation"] = "brief"
+                    send_kwargs["structured_payload"] = notification_payload
                 success = notifier.send(report_content, **send_kwargs)
                 _record_market_review_notification_run(
                     query_id=history_query_id,
@@ -519,13 +527,34 @@ def _render_market_review_payload_markdown(
     payload: Dict[str, Any],
     *,
     wrapper_title: Optional[str] = None,
+    prefer_brief: bool = False,
 ) -> str:
     """Render Markdown from the structured market-review payload for file/push compatibility."""
     metadata = _market_review_region_metadata(payload.get("region"))
+    if prefer_brief and _has_market_brief(payload):
+        markets = payload.get("markets")
+        if isinstance(markets, dict):
+            body = "\n\n---\n\n".join(
+                _render_market_review_payload_markdown(markets[market], prefer_brief=True)
+                for market in _MARKET_REVIEW_REGION_ORDER if market in markets
+            )
+        else:
+            body = payload["brief"]["markdown"]
+        return f"{metadata}{body}".strip()
     body = _render_market_review_payload_body(payload)
     if wrapper_title:
         return f"{metadata}{wrapper_title}\n\n{body}".strip()
     return f"{metadata}{body}".strip()
+
+
+def _has_market_brief(payload: Dict[str, Any]) -> bool:
+    brief = payload.get("brief")
+    if isinstance(brief, dict) and isinstance(brief.get("markdown"), str) and brief["markdown"].strip():
+        return True
+    markets = payload.get("markets")
+    return isinstance(markets, dict) and any(
+        isinstance(item, dict) and _has_market_brief(item) for item in markets.values()
+    )
 
 
 def _render_market_review_merge_markdown(

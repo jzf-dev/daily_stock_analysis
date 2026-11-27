@@ -1,7 +1,8 @@
 name: 每日股票分析
+run-name: ${{ github.workflow }} · ${{ inputs.mode || 'full' }}
 
 on:
-  # 由 Windows 任务计划程序在工作日北京时间 14:20 调用 workflow_dispatch。
+  # 由 Windows 任务计划程序在工作日北京时间 14:20 / 15:20 调用 workflow_dispatch。
   # 保留单一自动触发源，避免 GitHub 原生定时延迟后重复分析和推送。
   # 手动触发
   workflow_dispatch:

@@ -2086,7 +2086,15 @@ def build_share_image_html(
     fallback_html = _render_markdown_fragment(body_markdown)
     stamp = _extract_date(markdown_text, generated)
     source_line = ""
-    if report_kind == "market":
+    if (
+        isinstance(structured_payload, Mapping)
+        and structured_payload.get("kind") == "market_review"
+        and structured_payload.get("presentation") == "brief"
+    ):
+        title = first_title
+        subtitle = ""
+        content = _generic_body(fallback_html)
+    elif report_kind == "market":
         if market_segments:
             title = _poster_text(language, "multi_title")
             subtitle = _poster_text(language, "multi_subtitle")

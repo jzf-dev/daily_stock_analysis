@@ -805,9 +805,9 @@ If `--stocks` is also present, the Futu portfolio wins. Scheduled mode reloads r
 
 ### GitHub Actions Schedule
 
-This repository's daily workflow currently retains only `workflow_dispatch`, called by Windows Task Scheduler at 14:20 Beijing time on weekdays. Analysis still runs on GitHub runners with the existing repository Secrets / Variables; Windows does not need local model keys or Python analysis dependencies.
+This repository's daily workflow retains only `workflow_dispatch`, called by Windows Task Scheduler on weekdays: the existing `full` flow at 14:20 Beijing time (stocks retain market context, without a standalone market notification) and an independent `market-only` review at 15:20. These are analysis start times; delivery depends on runner queues, providers, and model duration. Analysis still runs on GitHub runners with the existing repository Secrets / Variables; Windows does not need local model keys or Python analysis dependencies.
 
-Run the Windows task as the user already signed in to GitHub, and retrieve credentials through that user's Git Credential Manager for in-process GitHub API authentication. Do not store tokens in scripts, task arguments, or logs. The account needs workflow write access to the repository. The current setup requires the Windows user to remain signed in (a locked session works), with the computer powered on and online; the task can request wake from sleep and catch up after a missed start. Set a weekly Monday-Friday 14:20 trigger in Beijing time and ignore new instances while one is running.
+Run the Windows task as the user already signed in to GitHub, and retrieve credentials through that user's Git Credential Manager for in-process GitHub API authentication. Do not store tokens in scripts, task arguments, or logs. The account needs workflow write access to the repository. The current setup requires the Windows user to remain signed in (a locked session works), with the computer powered on and online; the task can request wake from sleep and catch up after a missed start. Set weekly Monday-Friday triggers at 14:20 and 15:20 Beijing time and ignore new instances of each task. Workflow run titles include `full`, `stocks-only`, or `market-only`; dispatch deduplication and local accepted-request markers are scoped to the mode and daily window, so a stock run does not suppress a market review.
 
 Validate credentials and workflow access first, publish removal of the original `on.schedule`, and then enable the Windows task to prevent duplicate notifications. An accepted API request means submission, not successful analysis; check the GitHub Actions result for completion. Before retrying a failed request, check whether it already created a run.
 
@@ -828,6 +828,18 @@ Common time reference:
 | 15:00 | `'0 7 * * 1-5'` |
 | 18:00 | `'0 10 * * 1-5'` |
 | 21:00 | `'0 13 * * 1-5'` |
+
+#### Chinese A-share market brief
+
+Standalone Chinese A-share notifications use a concise plain-language brief: market summary, technology/value phases, relative strength, sectors to watch, and changes against the previous completed daily bar. No extra model call is added. Full model analysis and existing fields remain in files/history; full Web/API/Desktop reports, merged notifications, other languages, and other markets retain their existing content.
+
+The representative indices are STAR 50 (`sh000688`), CSI Dividend (`sh000922`), and CSI 300 (`sh000300`) for relative comparisons. They do not establish constituent breadth or actual fund flows. Rules use 20/60 completed daily bars: a recent high followed by a 3% pullback and weakening short trend flags top risk; a recent low followed by a 3% rebound and improving short trend flags a bottom watch. Recovery requires a breakout of the preceding 20-bar high after a decline, improving trend, and volume at least 1.3 times the preceding 20-bar mean. These are explainable observations without a backtested accuracy or return guarantee. Reference levels use the preceding 20-bar high/low, and five-day comparisons require identical dates.
+
+The A-share calendar determines the last completed session. Intraday collection excludes today's partial bar. Stale, duplicate, missing-session, invalid, unverified, or fewer than 61 bars produce an explicit unavailable state. Previous-day changes are recomputed from historical bars, not presented as a comparison with a previous notification; no cross-run GitHub database persistence is assumed.
+
+Daily industry leaders are candidates only. Registered industry indices can validate banking, brokerage, new energy, defense, medical, liquor, and steel directions. At most three matched candidates receive historical checks; unmatched directions remain watch-only. A sector is highlighted only with a strengthening trend, positive five-day relative strength versus CSI 300, and volume at least the previous 20-bar mean. Never fill a quota from daily gains alone. Brief images render the same content without appending full ranking tables.
+
+Publish the mode-aware workflow and runtime code before enabling the 15:20 task and switching both tasks to the mode-aware dispatcher; 14:20 remains `full`. To roll back, disable 15:20 and restore the previous runtime and the original 14:20 dispatcher. No database schema or environment variable is added.
 
 ### Local Scheduled Tasks
 

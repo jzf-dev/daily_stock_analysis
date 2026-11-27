@@ -2100,7 +2100,7 @@ Market conditions can change quickly. The data above is for reference only and d
 *复盘时间: {datetime.now().strftime('%H:%M')}*
 """
     
-    def _run_daily_review_parts(self) -> MarketLightReviewResult:
+    def _run_daily_review_parts(self, *, include_brief: bool = False) -> MarketLightReviewResult:
         """Run market review once and keep report/snapshot on the same overview."""
         logger.info("========== Starting Market Review Analysis ==========")
 
@@ -2120,6 +2120,12 @@ Market conditions can change quickly. The data above is for reference only and d
             report,
             snapshot,
         )
+        if include_brief and self.region == "cn" and self._get_output_language() == "zh":
+            from src.core.market_style import build_market_brief
+
+            structured_payload["brief"] = build_market_brief(
+                self.data_manager, overview, snapshot or {},
+            )
 
         logger.info("========== Market Review Analysis Complete ==========")
 
@@ -2186,9 +2192,9 @@ Market conditions can change quickly. The data above is for reference only and d
         """
         return self.run_daily_review_with_snapshot().report
 
-    def run_daily_review_with_snapshot(self) -> MarketLightReviewResult:
+    def run_daily_review_with_snapshot(self, *, include_brief: bool = False) -> MarketLightReviewResult:
         """Run daily review and return the report plus its structured Market Light snapshot."""
-        return self._run_daily_review_parts()
+        return self._run_daily_review_parts(include_brief=include_brief)
 
 
 # 测试入口
