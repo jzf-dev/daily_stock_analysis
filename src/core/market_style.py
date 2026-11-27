@@ -10,6 +10,7 @@ import pandas as pd
 
 from data_provider.base import DataFetchError
 from src.core.trading_calendar import build_market_phase_context, get_market_now, get_trading_dates
+from src.data.market_fund_catalog import get_fund_reference
 from src.services.stock_list_parser import ParseStatus, parse_analysis_target
 
 logger = logging.getLogger(__name__)
@@ -18,6 +19,7 @@ STYLE_INDICES = {
     "technology": ("sh000688", "科创50", "科技成长"),
     "value": ("sh000922", "中证红利", "传统价值／红利"),
 }
+STYLE_DISPLAY_CODES = {"technology": "1B0688.SH", "value": "000922.CSI"}
 BENCHMARK = "sh000300"
 # Only registered industry indices are eligible for historical verification.
 SECTOR_INDICES = {
@@ -27,6 +29,10 @@ SECTOR_INDICES = {
     "医疗": "sz399989", "医疗服务": "sz399989", "白酒": "sz399997",
     "钢铁": "930606.CSI", "钢铁行业": "930606.CSI",
 }
+# Scan each registered direction even when the daily leaderboard is unavailable.
+SECTOR_POOL = {}
+for _sector_name, _sector_code in SECTOR_INDICES.items():
+    SECTOR_POOL.setdefault(_sector_code, _sector_name)
 STAGES = {
     "top_risk": ("🟠 顶部预警，尚未确认", "之前涨过一段，现在开始涨不动，要留意继续回落。"),
     "bottom_watch": ("🟡 筑底观察，尚未确认", "跌了之后有回稳迹象，还需要多观察，不能说已经跌完。"),
@@ -167,7 +173,10 @@ def build_market_brief(manager: Any, overview: Any, light: Dict[str, Any], *, no
     styles = {}
     for key, (code, name, label) in STYLE_INDICES.items():
         bars = load(code)
-        observation = {"code": code, "name": name, "label": label, "available": bars is not None}
+        observation = {
+            "code": code, "name": name, "label": label, "available": bars is not None,
+            "display_code": STYLE_DISPLAY_CODES[key],
+        }
         if bars is None:
             observation["reason"] = failures[code]
         else:
@@ -180,7 +189,8 @@ def build_market_brief(manager: Any, overview: Any, light: Dict[str, Any], *, no
     candidates = []
     seen = set()
     # A daily leaderboard is a candidate list, never sufficient for a recommendation.
-    for sector in list(overview.top_sectors or [])[:5]:
+    sector_inputs = list(overview.top_sectors or [])[:5] + [{"name": name} for name in SECTOR_POOL.values()]
+    for sector in sector_inputs:
         if not isinstance(sector, dict):
             continue
         name = str(sector.get("name") or "").strip()
@@ -189,22 +199,38 @@ def build_market_brief(manager: Any, overview: Any, light: Dict[str, Any], *, no
         if not name or identity in seen:
             continue
         seen.add(identity)
-        item = {"name": name, "verified": False, "reason": "只知道当天涨得靠前，还没核实持续性"}
-        if code and len([candidate for candidate in candidates if candidate.get("code")]) < 3:
+        item = {
+            "name": name, "verified": False, "history_available": False,
+            "reason": "只知道当天涨得靠前，还没核实持续性",
+        }
+        if code:
             item["code"] = code
-            bars = load(code)
+            bars = load(code) if benchmark is not None else None
             if bars is not None and benchmark is not None:
                 signal = classify_style(bars)
                 strength = relative_strength(bars, benchmark)
+                extended = float(bars["close"].iloc[-1]) / float(bars["close"].tail(20).mean()) - 1 >= 0.1
                 verified = (
                     signal["stage"] in {"rising", "recovering"}
                     and signal["price"] > signal["ma20"]
                     and signal["volume_ratio"] is not None and signal["volume_ratio"] >= 1.0
                     and strength is not None and strength > 0
+                    and not extended
                 )
-                item.update(signal, relative_5d=strength, verified=verified)
+                item.update(signal, relative_5d=strength, verified=verified, history_available=True)
                 item["index_name"] = index_names[code]
-                item["reason"] = "走势较稳，近五日比沪深300更强，成交量也跟上了" if verified else "走势和成交量还没同时确认，先观察"
+                item["reason"] = "走势和成交量还没同时确认，先观察"
+                if extended:
+                    item["reason"] = "已高于近20日均价一成以上，先等回落站稳，不追涨"
+                elif verified:
+                    item["outlook"] = "企稳转强观察" if signal["stage"] == "recovering" else "上涨延续观察"
+                    item["reason"] = (
+                        "低位后放量突破，留意转强能否持续" if signal["stage"] == "recovering"
+                        else "走势向上，成交量也跟上了，留意强势能否延续"
+                    )
+                    item["fund_reference"] = get_fund_reference(code, now.date())
+                elif signal["stage"] == "bottom_watch":
+                    item["reason"] = "低位开始回稳，但还没确认转强，先等放量突破"
                 item["source"] = sources[code]
             elif code in failures:
                 item["reason"] = failures[code]
@@ -218,6 +244,10 @@ def build_market_brief(manager: Any, overview: Any, light: Dict[str, Any], *, no
         "phase": phase.phase.value,
         "styles": styles, "sectors": candidates,
         "benchmark_available": benchmark is not None,
+        "sector_scan": {
+            "total": len(SECTOR_POOL),
+            "available": sum(item["history_available"] for item in candidates if item.get("code")),
+        },
     }
     result["markdown"] = render_market_brief(result, light)
     return result
@@ -250,8 +280,9 @@ def render_market_brief(brief: Dict[str, Any], light: Dict[str, Any]) -> str:
     changes = []
     for key, icon in (("technology", "💻"), ("value", "🏦")):
         item = brief["styles"][key]
+        index_label = f"{item['name']}（{item.get('display_code', STYLE_DISPLAY_CODES[key])}）"
         if not item["available"]:
-            lines.extend([f"**{icon} {item['label']}：暂无法判断**", item["reason"], ""])
+            lines.extend([f"**{icon} {item['label']}：暂无法判断**", f"看 {index_label}：{item['reason']}", ""])
             continue
         stage_title, explanation = STAGES[item["stage"]]
         support_text = (
@@ -266,7 +297,7 @@ def render_market_brief(brief: Dict[str, Any], light: Dict[str, Any]) -> str:
         )
         lines.extend([
             f"**{icon} {item['label']}：{stage_title}**", explanation,
-            f"看 {item['name']}：最近收盘 {item['price']:.2f} 点；近五日 {item['return_5d']:+.2f}%。",
+            f"看 {index_label}：最近收盘 {item['price']:.2f} 点；近五日 {item['return_5d']:+.2f}%。",
             f"{support_text}；{resistance_text}。", "",
         ])
         previous = item["previous_stage"]
@@ -289,13 +320,26 @@ def render_market_brief(brief: Dict[str, Any], light: Dict[str, Any]) -> str:
     else:
         rotation = "两边的同期日线没有齐全，暂时看不清谁更强。"
     lines.extend(["**🔄 谁更强？**", rotation, "", "**⭐ 哪些板块值得留意？**"])
-    recommendations = [item for item in brief["sectors"] if item["verified"]][:3]
+    recommendations = sorted(
+        [item for item in brief["sectors"] if item["verified"]],
+        key=lambda item: item["relative_5d"], reverse=True,
+    )[:3]
+    fund_review_dates = set()
     if recommendations:
         for item in recommendations:
-            lines.append(
-                f"- **{item['name']}**：{item['reason']}；"
-                f"看{item['index_name']}能否站稳 {item['resistance']:.2f} 点，跌破 {item['support']:.2f} 点则重新评估。"
-            )
+            lines.extend([
+                f"**{item['name']}｜{item.get('outlook', '上涨延续观察')}**",
+                f"{item['reason']}；近五日比沪深300多涨 {item['relative_5d']:.2f} 个百分点。",
+                f"看{item['index_name']}能否放量站稳 {item['resistance']:.2f} 点，跌破 {item['support']:.2f} 点则重新评估。",
+            ])
+            reference = item.get("fund_reference", {})
+            if reference.get("status") == "reviewed":
+                funds_text = "／".join(f"{fund['name']}（{fund['code']}）" for fund in reference["funds"])
+                lines.append(f"对应基金参考，支付宝搜代码：{funds_text}。")
+                fund_review_dates.add(reference["reviewed_on"])
+            else:
+                lines.append(reference.get("reason", "暂无已核对的同指数场外基金") + "。")
+            lines.append("")
     else:
         lines.append("暂没有趋势和量能都符合条件的板块，不凑推荐。")
     watch = [item for item in brief["sectors"] if not item["verified"]][:2]
@@ -303,4 +347,12 @@ def render_market_brief(brief: Dict[str, Any], light: Dict[str, Any]) -> str:
         lines.extend(["", "先观察：" + "；".join(f"{item['name']}（{item['reason']}）" for item in watch) + "。"])
     lines.extend(["", "**📌 比上一交易日**", "；".join(changes) + "。" if changes else "完整日线不足，暂时不能比较。", ""])
     lines.append("科创50、中证红利只是两类风格的代表；未核验组内上涨比例。关键点位来自此前20个完整交易日，仅供观察。")
+    scan = brief.get("sector_scan")
+    if scan:
+        lines.append(f"本次检查银行、证券、新能源、军工、医疗、白酒、钢铁，{scan['available']}/{scan['total']} 个方向日线有效；不是全市场排名，也不保证上涨。")
+    if fund_review_dates:
+        lines.append(
+            f"基金资料核对：{'、'.join(sorted(fund_review_dates))}。A/C是同系列不同收费份额；"
+            "支付宝上架、申购状态及费率以页面为准，留意持有期和赎回费。"
+        )
     return "\n".join(lines)

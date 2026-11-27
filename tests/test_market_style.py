@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Regression coverage for dated style signals and the actual notification renderer."""
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import MagicMock, create_autospec, patch
 from zoneinfo import ZoneInfo
@@ -10,9 +10,10 @@ import pandas as pd
 import pytest
 
 from src.core.market_style import (
-    BENCHMARK, STYLE_INDICES, build_market_brief, classify_style, prepare_daily_bars,
+    BENCHMARK, SECTOR_POOL, STYLE_INDICES, build_market_brief, classify_style, prepare_daily_bars,
     relative_strength,
 )
+from src.data.market_fund_catalog import FUND_FAMILIES, FUND_REVIEW_MAX_DAYS, get_fund_reference
 from src.core.trading_calendar import get_trading_dates
 from src.market_analyzer import MarketOverview
 from src.market_analyzer import MarketAnalyzer
@@ -203,7 +204,7 @@ def test_legacy_and_other_market_rendering_are_preserved():
     assert "Existing English report" in _render_market_review_payload_markdown(payload, prefer_brief=True)
 
 
-@pytest.mark.parametrize("language,include_brief,expected_calls", [("zh", False, 0), ("zh", True, 3), ("en", True, 0), ("ko", True, 0)])
+@pytest.mark.parametrize("language,include_brief,expected_calls", [("zh", False, 0), ("zh", True, 10), ("en", True, 0), ("ko", True, 0)])
 def test_analyzer_only_collects_extra_history_for_requested_chinese_pushes(language, include_brief, expected_calls):
     manager = HistoryManager()
     config = SimpleNamespace(report_language=language)
@@ -233,3 +234,98 @@ def test_unverified_calendar_abstains_without_fetching_or_guessing_dates():
     assert not result["calendar_verified"]
     assert "交易日期无法核验" in result["markdown"]
     assert "交易时点未核验" in result["markdown"]
+
+
+def test_index_search_codes_are_visible_even_when_style_data_is_unavailable():
+    manager = HistoryManager({"sh000688": pd.DataFrame(), "sh000922": pd.DataFrame()})
+    result = build_market_brief(manager, MarketOverview(date=DAY.isoformat()), {}, now=NOW)
+    assert "科创50（1B0688.SH）" in result["markdown"]
+    assert "中证红利（000922.CSI）" in result["markdown"]
+    assert "暂无法判断" in result["markdown"]
+
+
+def test_missing_daily_leaderboard_still_scans_the_bounded_pool_and_deduplicates_indices():
+    bank = bars([100 + index for index in range(80)])
+    manager = HistoryManager({"sz399986": bank})
+    overview = MarketOverview(date=DAY.isoformat(), top_sectors=[])
+    result = build_market_brief(manager, overview, {}, now=NOW)
+    assert result["sector_scan"] == {"total": 7, "available": 7}
+    assert next(item for item in result["sectors"] if item.get("code") == "sz399986")["verified"]
+    called_codes = [code for code, _ in manager.calls]
+    assert set(called_codes) == {BENCHMARK, "sh000688", "sh000922", *SECTOR_POOL}
+    assert len(called_codes) == len(set(called_codes)) == 10
+
+    overview.top_sectors = [{"name": "银行"}, {"name": "银行行业"}, {"name": "未知题材"}]
+    result = build_market_brief(HistoryManager({"sz399986": bank}), overview, {}, now=NOW)
+    assert len([item for item in result["sectors"] if item.get("code") == "sz399986"]) == 1
+    assert not next(item for item in result["sectors"] if item["name"] == "未知题材")["verified"]
+
+
+def test_selected_sector_uses_an_exact_reviewed_fund_mapping_in_notification_and_image():
+    from dataclasses import replace
+    from src.core.market_review import _render_market_review_payload_markdown
+    from src.share_image import build_share_image_html
+
+    bank = bars([100 + index for index in range(80)])
+    reviewed_family = replace(FUND_FAMILIES["sz399986"], reviewed_on=DAY)
+    with patch.dict(FUND_FAMILIES, {"sz399986": reviewed_family}):
+        result = build_market_brief(HistoryManager({"sz399986": bank}), MarketOverview(date=DAY.isoformat()), {}, now=NOW)
+    selected = next(item for item in result["sectors"] if item.get("code") == "sz399986")
+    reference = selected["fund_reference"]
+    assert reference["index_code"] == selected["code"]
+    assert reference["status"] == "reviewed"
+    assert reference["platform_availability_verified"] is False
+    assert {fund["share_class"] for fund in reference["funds"]} == {"A", "C"}
+    payload = {"kind": "market_review", "region": "cn", "brief": result, "presentation": "brief"}
+    markdown = _render_market_review_payload_markdown(payload, prefer_brief=True)
+    html = build_share_image_html(markdown, structured_payload=payload)
+    for content in (markdown, html):
+        assert "天弘中证银行ETF联接A" in content
+        assert "001594" in content and "001595" in content
+        assert "1B0688.SH" in content and "000922.CSI" in content
+        assert "上涨延续观察" in content
+        assert "以页面为准" in content
+        assert DAY.isoformat() in content
+
+
+def test_watch_or_extended_sectors_do_not_become_fund_recommendations():
+    extended = bars([100.0] * 79 + [120.0])
+    manager = HistoryManager({"sz399986": extended})
+    result = build_market_brief(manager, MarketOverview(date=DAY.isoformat()), {}, now=NOW)
+    bank = next(item for item in result["sectors"] if item.get("code") == "sz399986")
+    assert bank["history_available"] and not bank["verified"]
+    assert "不追涨" in bank["reason"]
+    assert "fund_reference" not in bank
+    assert "001595" not in result["markdown"]
+    assert "不凑推荐" in result["markdown"]
+
+
+def test_sector_order_uses_relative_strength_and_limits_recommendations_to_three():
+    histories = {code: bars([100 + index * slope for index in range(80)])
+                 for code, slope in zip(SECTOR_POOL, [0.7, 0.8, 0.9, 1, 1.1, 1.2, 1.3])}
+    result = build_market_brief(HistoryManager(histories), MarketOverview(date=DAY.isoformat()), {}, now=NOW)
+    selected = sorted(result["sectors"], key=lambda item: item["relative_5d"], reverse=True)[:3]
+    assert [item["name"] for item in selected] == ["钢铁", "白酒", "医疗"]
+    markdown = result["markdown"]
+    assert markdown.index("**钢铁｜") < markdown.index("**白酒｜") < markdown.index("**医疗｜")
+    assert "**银行｜" not in markdown and "**军工｜" not in markdown
+
+
+@pytest.mark.parametrize("offset", [-1, FUND_REVIEW_MAX_DAYS + 1])
+def test_unreviewed_or_expired_fund_identity_is_not_exposed_as_current(offset):
+    family = FUND_FAMILIES["sz399986"]
+    reference = get_fund_reference("sz399986", family.reviewed_on + timedelta(days=offset))
+    assert reference["status"] == "review_required"
+    assert reference["funds"] == []
+    assert reference["platform_availability_verified"] is False
+
+
+def test_same_named_theme_does_not_substitute_a_different_or_liquidated_fund():
+    reference = get_fund_reference("sh000941", date(2026, 11, 27))
+    assert reference["status"] == "unmapped" and reference["funds"] == []
+    assert "暂无已核对" in reference["reason"]
+    assert "huaan.com.cn" in reference["source_url"]
+    # Medical equipment/services index is not the all-share pharmaceuticals index.
+    medical = get_fund_reference("sz399989", date(2026, 11, 27))
+    assert all("医药卫生" not in fund["name"] for fund in medical["funds"])
+    assert get_fund_reference("000941.SH", date(2026, 11, 27))["funds"] == []
